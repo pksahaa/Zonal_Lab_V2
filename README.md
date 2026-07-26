@@ -1,10 +1,72 @@
 # Zonal Water Quality Lab — LIMS
 
+## Redesign — Phase C (this round): UX overhaul
+
+1. **Sample Registration form redesigned** to match the reference mockup's field
+   layout: Client Type* (DPHE/Private/Individual — quick categorization,
+   separate from the richer optional Reference link), Customer Name, Father's/
+   Husband's Name, District/Upazila/Union, Location/Address, Latitude/
+   Longitude, Type of Water Point, Sample Type* (required), plus all the
+   original fields (Village, Caretaker, Sample Source, Priority, batch size).
+2. **Bulk Upload gets a Client/Reference picker** — applied to the whole
+   uploaded batch at once, alongside the existing test-type picker.
+3. **Add Test Record: "How are you selecting samples?" dropdown** (Individual
+   Sample / Sub-Batch) — the two pickers that used to show side-by-side now
+   show one at a time based on this choice, and switching modes clears any
+   stale selection.
+4. **Bulk Result Upload moved from a standalone section into the Sub-Batch
+   list itself** — a pending group inside a Batch now shows an "Upload with
+   Template" button right there (`BatchGroupUploadModal`), with no separate
+   test-type/sample selection since the group's membership is already fixed.
+   Produces the same record shape as running it manually (`sourceBatchId`
+   etc.), so status tracking is unaffected either way.
+5. **Reports restructured into two top-level tabs**: "Reports & Analytics"
+   (all the existing BI/analytics pages, unchanged) and "Custom Report" (new),
+   which has its own sub-tabs: **Multi Sample Report** (the original custom
+   report generator, now with the same Individual/Sub-Batch selection-type
+   dropdown — picking a Sub-Batch pulls in all its member samples at once),
+   **Single Sample Report** (new, simpler — pick one sample, generate its
+   report), and **Others** (placeholder for future report types).
+
+Note: the old standalone `BulkResultUpload` component and `16-test-run.js`
+are unused now but left in their files rather than deleted, to minimize risk.
+
 Split version of `Water_Quality_Lab_LIMS_Standalone_V2.html` for GitHub deployment.
 No build step needed — this is plain JS loaded via `<script src="">` tags in order,
 exactly like the original single-file version.
 
-## Redesign — Phase A (this round)
+## Redesign — Phase B (this round): mixed-parameter batches
+
+A Batch (`16-sub-batch.js`) can now hold samples needing DIFFERENT test
+parameters — matching how the lab actually "brackets" testing: grab a pile of
+samples, whatever each one specifically needs gets checked off, run together.
+
+- **Data model**: a batch's `members` is now a flat list of `{sampleId,
+  testTypeId, testTypeName}` pairs instead of one `testTypeId` for the whole
+  batch. Old batches (single test type) are migrated automatically on load —
+  nothing stored needs manual fixing.
+- **Batch Builder** (Samples → Create and Edit Sub-Batches): a sample-centric
+  picker — each sample shows its own eligible pending tests as checkable
+  chips, so you build up (sample, test) pairs freely across multiple test
+  types in one batch. "Auto-Select" and "Auto-Create Batches" both work on
+  pairs now, same spirit as Phase A.
+- **Running a batch**: since chemical consumption/formulas/QC rules are still
+  fundamentally per-Test-Type (that's the Test Method Engine's job, unchanged),
+  "running" a batch means running each of its distinct test types separately.
+  Add Test Record's "OR Select Sub-Batch" picker shows a secondary "which
+  test type in this batch?" selector when a batch has more than one pending
+  group. Each run produces its own Test Record, tagged with `sourceBatchId`
+  so it always traces back to the exact batch/group it came from.
+- **Batch status** (Pending / Partially Run / Completed) is derived from
+  which of its groups have a Test Record, not stored — same "derive, don't
+  store" principle as Phase A's sample progress tracking, for the same reason:
+  nothing to fall out of sync. A batch can't be deleted once at least one of
+  its groups has been run (clear message explaining why).
+- Fixed a bug found while wiring this up: the sample delete-safety check
+  still referenced the old batch shape and would throw once any batch used
+  the new mixed-parameter structure.
+
+## Redesign — Phase A (previous round)
 
 Following a full architecture discussion, this addresses the "sample lifecycle
 stages aren't interconnected" problem at its root:

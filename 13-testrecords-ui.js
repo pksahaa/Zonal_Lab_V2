@@ -27,6 +27,7 @@ function AddTestTab({
 }) {
   const [selectedSampleId, setSelectedSampleId] = useState("");
   const [selectedSubBatchId, setSelectedSubBatchId] = useState("");
+  const [selectionMode, setSelectionMode] = useState("individual"); // "individual" | "subBatch"
   const [memberInputs, setMemberInputs] = useState({}); // { [sampleId]: { [paramId]: { [inputKey]: value } } } — sub-batch mode only
   const [selectedTestId, setSelectedTestId] = useState(testTypes[0]?.id || "");
   const [values, setValues] = useState({});
@@ -63,12 +64,16 @@ function AddTestTab({
   // in_progress, i.e. not yet at results/review/approval/release).
   const linkableSamples = (samples || []).filter(s => ["registered", "received", "assigned", "in_progress"].includes(s.status));
   const selectedSample = (samples || []).find(s => s.id === selectedSampleId) || null;
-  const pendingSubBatches = (subBatches || []).filter(sb => sb.status === "pending");
+  // A batch is offered here as long as it has AT LEAST ONE pending (not yet
+  // run) test-type group — it may also have other groups already completed.
+  const pendingSubBatches = (subBatches || []).filter(sb => batchOverallStatus(sb, testRecords) !== "completed");
   const selectedSubBatch = pendingSubBatches.find(sb => sb.id === selectedSubBatchId) || null;
-  const subBatchMembers = selectedSubBatch ? selectedSubBatch.memberSampleIds.map(id => (samples || []).find(s => s.id === id)).filter(Boolean) : [];
+  const pendingGroupsForSelectedBatch = selectedSubBatch ? distinctTestTypesInBatch(selectedSubBatch).filter(g => batchGroupStatus(selectedSubBatch, g.testTypeId, testRecords) === "pending") : [];
+  const subBatchMemberIds = selectedSubBatch && selectedTestId ? batchMembersForTestType(selectedSubBatch, selectedTestId) : [];
+  const subBatchMembers = subBatchMemberIds.map(id => (samples || []).find(s => s.id === id)).filter(Boolean);
   // Once a sample or sub-batch is picked, only show the test type(s) it actually requested —
   // instead of every test type in the system.
-  const testTypesForForm = selectedSubBatch ? testTypes.filter(t => t.id === selectedSubBatch.testTypeId) : selectedSample ? testTypes.filter(t => selectedSample.requestedTests.some(rt => rt.testTypeId === t.id)) : testTypes;
+  const testTypesForForm = selectedSubBatch ? testTypes.filter(t => t.id === selectedTestId) : selectedSample ? testTypes.filter(t => selectedSample.requestedTests.some(rt => rt.testTypeId === t.id)) : testTypes;
   const chemGroups = selectedTest ? selectedTest.chemicalRequirements : [];
   const dilutionGroups = selectedTest ? selectedTest.dilutionChemicalRequirements || [] : [];
   const resultParameters = selectedTest?.resultParameters || [];
@@ -284,13 +289,25 @@ function AddTestTab({
     }
     setNumberOfFieldSamples(String(selectedSample.numberOfSamples || 1));
   }, [selectedSampleId]);
-  // When a sub-batch is picked: lock the Test Type to the sub-batch's method
-  // and prefill No. of Field Samples from its member count.
+  // When a batch is picked: if it has exactly one pending test-type group,
+  // lock the Test Type to it automatically (matches the old single-type
+  // batch UX with zero extra clicks). If it has more than one pending group
+  // (a mixed batch), leave Test Type blank until the group selector below
+  // is used — selecting a group there sets selectedTestId directly.
   useEffect(() => {
     if (editingRecord || !selectedSubBatch) return;
-    setSelectedTestId(selectedSubBatch.testTypeId);
-    setNumberOfFieldSamples(String(selectedSubBatch.memberSampleIds.length));
+    const pendingGroups = distinctTestTypesInBatch(selectedSubBatch).filter(g => batchGroupStatus(selectedSubBatch, g.testTypeId, testRecords) === "pending");
+    if (pendingGroups.length === 1) {
+      setSelectedTestId(pendingGroups[0].testTypeId);
+      setNumberOfFieldSamples(String(batchMembersForTestType(selectedSubBatch, pendingGroups[0].testTypeId).length));
+    } else {
+      setSelectedTestId("");
+    }
   }, [selectedSubBatchId]);
+  useEffect(() => {
+    if (editingRecord || !selectedSubBatch || !selectedTestId) return;
+    setNumberOfFieldSamples(String(batchMembersForTestType(selectedSubBatch, selectedTestId).length));
+  }, [selectedSubBatchId, selectedTestId]);
   function setDirect(itemId, val) {
     setValues(prev => ({
       ...prev,
@@ -547,7 +564,8 @@ function AddTestTab({
       numberOfFieldSamples: fieldSamplesNum,
       sampleId: selectedSubBatch ? null : selectedSampleId || null,
       sampleCode: selectedSubBatch ? "" : selectedSample?.sampleCode || "",
-      memberSampleIds: selectedSubBatch ? selectedSubBatch.memberSampleIds : null,
+      memberSampleIds: selectedSubBatch ? subBatchMemberIds : null,
+      sourceBatchId: selectedSubBatch ? selectedSubBatch.id : null,
       feeApplicable,
       unitCost,
       billedSamples,
@@ -577,7 +595,7 @@ function AddTestTab({
           })
         };
       }),
-      memberResults: selectedSubBatch ? selectedSubBatch.memberSampleIds.map(sampleId => {
+      memberResults: selectedSubBatch ? subBatchMemberIds.map(sampleId => {
         const memberSample = (samples || []).find(s => s.id === sampleId);
         return {
           sampleId,
@@ -649,7 +667,7 @@ function AddTestTab({
       }
       if (selectedSubBatch && setSamples) {
         const newRecordForCheck = { id: newRecordId, ...recordPayload };
-        for (const memberId of selectedSubBatch.memberSampleIds) {
+        for (const memberId of subBatchMemberIds) {
           const member = (samples || []).find(s => s.id === memberId);
           if (!member) continue;
           let updatedMember = {
@@ -659,13 +677,10 @@ function AddTestTab({
           updatedMember = autoAdvanceSampleStatus(updatedMember, [...testRecords, newRecordForCheck], subBatches, session);
           setSamples(prev => prev.map(s => s.id === memberId ? updatedMember : s), updatedMember);
         }
-        if (setSubBatches) {
-          setSubBatches(prev => prev.map(sb => sb.id === selectedSubBatch.id ? {
-            ...sb,
-            status: "tested",
-            testRecordId: newRecordId
-          } : sb));
-        }
+        // No batch mutation needed here — batchGroupStatus/batchOverallStatus
+        // are derived from testRecords via sourceBatchId (just set above), so
+        // the batch's "completed" state updates itself the moment
+        // setTestRecords lands. Nothing to keep in sync by hand.
         setSelectedSubBatchId("");
         setMemberInputs({});
       }
@@ -988,63 +1003,104 @@ function AddTestTab({
     name: "plus",
     size: 14
   }), "Manage Test Types")), /*#__PURE__*/React.createElement("div", {
-    className: "px-4 pt-4 grid gap-3",
-    style: {
-      gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))"
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "flex flex-col gap-1 text-xs",
-    style: {
-      color: C.muted
-    }
-  }, "Select Sample (optional — links this record to a registered batch)", /*#__PURE__*/React.createElement("select", {
-    className: "border rounded px-2 py-1.5 text-sm",
-    style: {
-      borderColor: C.border
-    },
-    value: selectedSampleId,
-    onChange: e => {
-      setSelectedSampleId(e.target.value);
-      if (e.target.value) setSelectedSubBatchId("");
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "— No sample (standalone record) —"), linkableSamples.map(s => /*#__PURE__*/React.createElement("option", {
-    key: s.id,
-    value: s.id
-  }, s.sampleCode, " — ", s.clientName, " (", s.numberOfSamples || 1, " samples)")))), /*#__PURE__*/React.createElement("label", {
-    className: "flex flex-col gap-1 text-xs",
-    style: {
-      color: C.muted
-    }
-  }, "OR Select Sub-Batch (many samples, shared QC)", /*#__PURE__*/React.createElement("select", {
-    className: "border rounded px-2 py-1.5 text-sm",
-    style: {
-      borderColor: C.border
-    },
-    value: selectedSubBatchId,
-    onChange: e => {
-      setSelectedSubBatchId(e.target.value);
-      if (e.target.value) setSelectedSampleId("");
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "— No sub-batch —"), pendingSubBatches.map(sb => /*#__PURE__*/React.createElement("option", {
+  className: "px-4 pt-4 grid gap-3",
+  style: {
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))"
+  }
+}, /*#__PURE__*/React.createElement("label", {
+  className: "flex flex-col gap-1 text-xs",
+  style: {
+    color: C.muted
+  }
+}, "How are you selecting samples?", /*#__PURE__*/React.createElement("select", {
+  className: "border rounded px-2 py-1.5 text-sm",
+  style: {
+    borderColor: C.border
+  },
+  value: selectionMode,
+  onChange: e => {
+    setSelectionMode(e.target.value);
+    setSelectedSampleId("");
+    setSelectedSubBatchId("");
+  }
+}, /*#__PURE__*/React.createElement("option", {
+  value: "individual"
+}, "Individual Sample"), /*#__PURE__*/React.createElement("option", {
+  value: "subBatch"
+}, "Sub-Batch"))), selectionMode === "individual" && /*#__PURE__*/React.createElement("label", {
+  className: "flex flex-col gap-1 text-xs",
+  style: {
+    color: C.muted
+  }
+}, "Select Sample (optional — links this record to a registered batch)", /*#__PURE__*/React.createElement("select", {
+  className: "border rounded px-2 py-1.5 text-sm",
+  style: {
+    borderColor: C.border
+  },
+  value: selectedSampleId,
+  onChange: e => {
+    setSelectedSampleId(e.target.value);
+    if (e.target.value) setSelectedSubBatchId("");
+  }
+}, /*#__PURE__*/React.createElement("option", {
+  value: ""
+}, "— No sample (standalone record) —"), linkableSamples.map(s => /*#__PURE__*/React.createElement("option", {
+  key: s.id,
+  value: s.id
+}, s.sampleCode, " — ", s.clientName, " (", s.numberOfSamples || 1, " samples)")))), selectionMode === "subBatch" && /*#__PURE__*/React.createElement("label", {
+  className: "flex flex-col gap-1 text-xs",
+  style: {
+    color: C.muted
+  }
+}, "Select Sub-Batch (many samples, shared QC)", /*#__PURE__*/React.createElement("select", {
+  className: "border rounded px-2 py-1.5 text-sm",
+  style: {
+    borderColor: C.border
+  },
+  value: selectedSubBatchId,
+  onChange: e => {
+    setSelectedSubBatchId(e.target.value);
+    if (e.target.value) setSelectedSampleId("");
+  }
+}, /*#__PURE__*/React.createElement("option", {
+  value: ""
+}, "— No sub-batch —"), pendingSubBatches.map(sb => {
+  const pendingGroups = distinctTestTypesInBatch(sb).filter(g => batchGroupStatus(sb, g.testTypeId, testRecords) === "pending");
+  const groupSummary = pendingGroups.map(g => g.testTypeName).join(", ");
+  return /*#__PURE__*/React.createElement("option", {
     key: sb.id,
     value: sb.id
-  }, sb.label, " — ", sb.testTypeName, " (", sb.memberSampleIds.length, " samples)")))), selectedSample && /*#__PURE__*/React.createElement("div", {
-    className: "mx-4 mt-2 p-2 rounded text-xs",
-    style: {
-      background: C.infoBg,
-      color: C.info
-    }
-  }, "Batch of ", selectedSample.numberOfSamples || 1, " sample(s) from ", selectedSample.siteLocation, ". Requested tests: ", selectedSample.requestedTests.map(rt => rt.testTypeName).join(", "), "."), selectedSubBatch && /*#__PURE__*/React.createElement("div", {
-    className: "mx-4 mt-2 p-2 rounded text-xs",
-    style: {
-      background: C.infoBg,
-      color: C.info
-    }
-  }, selectedSubBatch.label, ": ", subBatchMembers.length, " sample(s) — ", subBatchMembers.map(s => s.sampleCode).join(", "), ". Test Type locked to ", selectedSubBatch.testTypeName, ".")), /*#__PURE__*/React.createElement("div", {
+  }, sb.label, " — ", sb.members.length, " pair(s), pending: ", groupSummary);
+}))), selectedSubBatch && pendingGroupsForSelectedBatch.length > 1 && /*#__PURE__*/React.createElement("label", {
+  className: "flex flex-col gap-1 text-xs mx-4 mt-2",
+  style: {
+    color: C.muted
+  }
+}, "This batch has multiple pending test types — which one are you running now?", /*#__PURE__*/React.createElement("select", {
+  className: "border rounded px-2 py-1.5 text-sm",
+  style: {
+    borderColor: C.border
+  },
+  value: selectedTestId,
+  onChange: e => setSelectedTestId(e.target.value)
+}, /*#__PURE__*/React.createElement("option", {
+  value: ""
+}, "— choose a test type —"), pendingGroupsForSelectedBatch.map(g => /*#__PURE__*/React.createElement("option", {
+  key: g.testTypeId,
+  value: g.testTypeId
+}, g.testTypeName, " (", batchMembersForTestType(selectedSubBatch, g.testTypeId).length, " samples)")))), selectedSample && /*#__PURE__*/React.createElement("div", {
+  className: "mx-4 mt-2 p-2 rounded text-xs",
+  style: {
+    background: C.infoBg,
+    color: C.info
+  }
+}, "Batch of ", selectedSample.numberOfSamples || 1, " sample(s) from ", selectedSample.siteLocation, ". Requested tests: ", selectedSample.requestedTests.map(rt => rt.testTypeName).join(", "), "."), selectedSubBatch && selectedTestId && subBatchMembers.length > 0 && /*#__PURE__*/React.createElement("div", {
+  className: "mx-4 mt-2 p-2 rounded text-xs",
+  style: {
+    background: C.infoBg,
+    color: C.info
+  }
+}, selectedSubBatch.label, ": ", subBatchMembers.length, " sample(s) — ", subBatchMembers.map(s => s.sampleCode).join(", "), ". Running ", selectedTest?.name || "", " for this group.")), /*#__PURE__*/React.createElement("div", {
     className: "p-4 grid gap-3.5",
     style: {
       gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))"
@@ -1294,7 +1350,7 @@ function AddTestTab({
     style: {
       borderBottom: `1px solid ${C.border}`
     }
-  }, p.name, p.unit ? ` (${p.unit})` : ""))])), /*#__PURE__*/React.createElement("tbody", null, selectedSubBatch.memberSampleIds.map(sampleId => renderSubBatchMemberRow(sampleId)))))), selectedSubBatch && resultParameters.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, p.name, p.unit ? ` (${p.unit})` : ""))])), /*#__PURE__*/React.createElement("tbody", null, subBatchMemberIds.map(sampleId => renderSubBatchMemberRow(sampleId)))))), selectedSubBatch && resultParameters.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "mx-4 text-xs p-2 rounded",
     style: {
       background: C.infoBg,
@@ -1887,17 +1943,7 @@ function TestRecordsTab({
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "grid gap-4"
-  }, testTypes && samples && /*#__PURE__*/React.createElement(BulkResultUpload, {
-    testTypes: testTypes,
-    samples: samples,
-    setSamples: setSamples,
-    testRecords: testRecords,
-    setTestRecords: setTestRecords,
-    subBatches: subBatches,
-    setSubBatches: setSubBatches,
-    session: session,
-    notify: notify
-  }), /*#__PURE__*/React.createElement(SectionCard, {
+  }, /*#__PURE__*/React.createElement(SectionCard, {
     title: `All Test Records (${testRecords.length})`,
     icon: /*#__PURE__*/React.createElement(Icon, {
       name: "clipboard",

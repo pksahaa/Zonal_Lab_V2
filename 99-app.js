@@ -125,7 +125,7 @@ function LabApp({
       ...t
     })));
     setTestRecords(loadKey("testRecords", []));
-    setSubBatches(loadKey("subBatches", []));
+    setSubBatches(normalizeBatches(loadKey("subBatches", [])));
     setReferences(loadKey("references", []));
     setLoaded(true);
   }, []);
@@ -355,6 +355,7 @@ function LabApp({
     setSamples: setSamples,
     testTypes: testTypes,
     testRecords: testRecords,
+    setTestRecords: setTestRecords,
     subBatches: subBatches,
     setSubBatches: setSubBatches,
     references: references,
@@ -443,6 +444,7 @@ function LabApp({
     testTypes: testTypes,
     testRecords: testRecords,
     samples: samples,
+    subBatches: subBatches,
     users: users,
     notify: notify,
     onLoadDemoData: loadDemoReportData

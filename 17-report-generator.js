@@ -175,11 +175,14 @@ function SignatorySlot({
 }
 function CustomReportGeneratorPage({
   samples,
+  subBatches,
   testTypes,
   testRecords,
   users,
   notify
 }) {
+  const [selectionMode, setSelectionMode] = React.useState("individual"); // "individual" | "subBatch"
+  const [pickedBatchId, setPickedBatchId] = React.useState("");
   const [q, setQ] = React.useState("");
   const [selectedSampleIds, setSelectedSampleIds] = React.useState([]);
   const [selectedTestIds, setSelectedTestIds] = React.useState([]);
@@ -219,6 +222,13 @@ function CustomReportGeneratorPage({
     // eslint-disable-next-line
   }, [availableTestIds.join(",")]);
   const selectedTests = testTypes.filter(t => selectedTestIds.includes(t.id));
+  function pickBatch(batchId) {
+    setPickedBatchId(batchId);
+    const batch = (subBatches || []).find(b => b.id === batchId);
+    if (!batch) { setSelectedSampleIds([]); return; }
+    const ids = Array.from(new Set((batch.members || []).map(m => m.sampleId)));
+    setSelectedSampleIds(ids);
+  }
   function toggleSample(id) {
     setSelectedSampleIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
@@ -268,7 +278,36 @@ function CustomReportGeneratorPage({
       name: "clipboard",
       size: 15
     })
-  }, /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mb-3",
+    style: { maxWidth: 320 }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "flex flex-col gap-1 text-xs",
+    style: { color: C.muted }
+  }, "How are you selecting samples?", /*#__PURE__*/React.createElement("select", {
+    className: "border rounded px-2 py-1.5 text-sm",
+    style: { borderColor: C.border },
+    value: selectionMode,
+    onChange: e => {
+      setSelectionMode(e.target.value);
+      setSelectedSampleIds([]);
+      setPickedBatchId("");
+    }
+  }, /*#__PURE__*/React.createElement("option", { value: "individual" }, "Individual Samples"), /*#__PURE__*/React.createElement("option", { value: "subBatch" }, "Sub-Batch")))), selectionMode === "subBatch" && /*#__PURE__*/React.createElement("label", {
+    className: "flex flex-col gap-1 text-xs mb-3",
+    style: { color: C.muted }
+  }, "Select Sub-Batch", /*#__PURE__*/React.createElement("select", {
+    className: "border rounded px-2 py-1.5 text-sm w-full",
+    style: { borderColor: C.border },
+    value: pickedBatchId,
+    onChange: e => pickBatch(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "— select a batch —"), (subBatches || []).map(sb => /*#__PURE__*/React.createElement("option", {
+    key: sb.id,
+    value: sb.id
+  }, sb.label, " (", (sb.members || []).length, " pair(s))")))), selectionMode === "subBatch" && pickedBatchId && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs mb-3 p-2 rounded",
+    style: { background: C.infoBg, color: C.info }
+  }, selectedSampleIds.length, " sample(s) pulled in from this batch. You can still fine-tune below."), selectionMode === "individual" && /*#__PURE__*/React.createElement("input", {
     className: "border rounded px-2 py-1.5 text-xs w-full mb-2",
     style: {
       borderColor: C.border
@@ -276,7 +315,7 @@ function CustomReportGeneratorPage({
     placeholder: "Search by sample code, client, site, village…",
     value: q,
     onChange: e => setQ(e.target.value)
-  }), distinctBatchRefs.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }), selectionMode === "individual" && distinctBatchRefs.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 mb-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-xs",
@@ -440,4 +479,232 @@ function CustomReportGeneratorPage({
     name: "printer",
     size: 14
   }), "Generate & Print Report (", selectedSampleIds.length, " sample", selectedSampleIds.length === 1 ? "" : "s", ")")));
+}
+
+function SingleSampleReportPage({
+  samples,
+  testTypes,
+  testRecords,
+  notify
+}) {
+  const [sampleId, setSampleId] = React.useState("");
+  const [selectedTestIds, setSelectedTestIds] = React.useState([]);
+  const [memo, setMemo] = React.useState({
+    memoNo: "",
+    date: todayStr(),
+    sentBy: "",
+    district: "",
+    sampleSource: "",
+    refMemoNo: "",
+    refMemoDate: "",
+    dateOfTesting: todayStr(),
+    receivingDate: "",
+    collectionDate: "",
+    notes: ""
+  });
+  const [signatories, setSignatories] = React.useState({
+    performedBy: [{
+      name: "",
+      designation: ""
+    }],
+    approvedBy: [{
+      name: "",
+      designation: ""
+    }]
+  });
+  const sample = (samples || []).find(s => s.id === sampleId) || null;
+  React.useEffect(() => {
+    if (sample) setSelectedTestIds(sample.requestedTests.map(rt => rt.testTypeId));
+    // eslint-disable-next-line
+  }, [sampleId]);
+  function toggleTest(id) {
+    setSelectedTestIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function generate() {
+    if (!sample) {
+      notify?.("Select a sample first.", "warn");
+      return;
+    }
+    const selectedTests = testTypes.filter(t => selectedTestIds.includes(t.id));
+    if (!selectedTests.length) {
+      notify?.("Select at least one test to include.", "warn");
+      return;
+    }
+    const html = buildReportHtml({
+      labIdentity: getLabIdentity(),
+      memo,
+      selectedSamples: [sample],
+      selectedTests,
+      testRecords,
+      signatories
+    });
+    printOfficialReport(html);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grid gap-4"
+  }, /*#__PURE__*/React.createElement(SectionCard, {
+    title: "Step 1 — Select a Sample",
+    icon: /*#__PURE__*/React.createElement(Icon, {
+      name: "clipboard",
+      size: 15
+    })
+  }, /*#__PURE__*/React.createElement(SelectField, {
+    simple: true,
+    label: "Sample",
+    value: sampleId,
+    onChange: setSampleId,
+    options: (samples || []).map(s => ({
+      value: s.id,
+      label: `${s.sampleCode} — ${s.clientName}`
+    })),
+    placeholder: "— select a sample —"
+  }), sample && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-medium mb-1.5",
+    style: {
+      color: C.muted
+    }
+  }, "Include These Tests"), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1.5"
+  }, sample.requestedTests.map(rt => {
+    const on = selectedTestIds.includes(rt.testTypeId);
+    return /*#__PURE__*/React.createElement("button", {
+      key: rt.testTypeId,
+      onClick: () => toggleTest(rt.testTypeId),
+      className: "px-2.5 py-1 rounded-full text-xs font-medium border",
+      style: {
+        background: on ? C.teal : "transparent",
+        color: on ? "#fff" : C.ink,
+        borderColor: on ? C.teal : C.border
+      }
+    }, rt.testTypeName);
+  })))), /*#__PURE__*/React.createElement(SectionCard, {
+    title: "Step 2 — Memo & Signatories",
+    icon: /*#__PURE__*/React.createElement(Icon, {
+      name: "printer",
+      size: 15
+    })
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-3 gap-3"
+  }, /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Memo No.",
+    value: memo.memoNo,
+    onChange: v => setMemo({
+      ...memo,
+      memoNo: v
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Date",
+    type: "date",
+    value: memo.date,
+    onChange: v => setMemo({
+      ...memo,
+      date: v
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Sent By",
+    value: memo.sentBy,
+    onChange: v => setMemo({
+      ...memo,
+      sentBy: v
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-3 mt-3"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-medium mb-1",
+    style: {
+      color: C.muted
+    }
+  }, "Performed By"), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Name",
+    value: signatories.performedBy[0].name,
+    onChange: v => setSignatories({
+      ...signatories,
+      performedBy: [{
+        ...signatories.performedBy[0],
+        name: v
+      }]
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Designation",
+    value: signatories.performedBy[0].designation,
+    onChange: v => setSignatories({
+      ...signatories,
+      performedBy: [{
+        ...signatories.performedBy[0],
+        designation: v
+      }]
+    })
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-medium mb-1",
+    style: {
+      color: C.muted
+    }
+  }, "Approved By"), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Name",
+    value: signatories.approvedBy[0].name,
+    onChange: v => setSignatories({
+      ...signatories,
+      approvedBy: [{
+        ...signatories.approvedBy[0],
+        name: v
+      }]
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Designation",
+    value: signatories.approvedBy[0].designation,
+    onChange: v => setSignatories({
+      ...signatories,
+      approvedBy: [{
+        ...signatories.approvedBy[0],
+        designation: v
+      }]
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end mt-3"
+  }, /*#__PURE__*/React.createElement(Button, {
+    onClick: generate
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "printer",
+    size: 14
+  }), "Generate Report"))));
+}
+function CustomReportSection(props) {
+  const [sub, setSub] = React.useState("multi");
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2 mb-4 no-print"
+  }, [{
+    k: "multi",
+    label: "Multi Sample Report"
+  }, {
+    k: "single",
+    label: "Single Sample Report"
+  }, {
+    k: "others",
+    label: "Others"
+  }].map(t => /*#__PURE__*/React.createElement("button", {
+    key: t.k,
+    onClick: () => setSub(t.k),
+    className: "px-3 py-1.5 rounded text-sm font-medium",
+    style: {
+      background: sub === t.k ? C.teal : "#fff",
+      color: sub === t.k ? "#fff" : C.muted,
+      border: `1px solid ${sub === t.k ? C.teal : C.border}`
+    }
+  }, t.label))), sub === "multi" && /*#__PURE__*/React.createElement(CustomReportGeneratorPage, props), sub === "single" && /*#__PURE__*/React.createElement(SingleSampleReportPage, props), sub === "others" && /*#__PURE__*/React.createElement("div", {
+    className: "text-sm p-6 text-center rounded",
+    style: {
+      color: C.muted,
+      background: C.card,
+      border: `1px solid ${C.border}`
+    }
+  }, "More report types coming soon."));
 }

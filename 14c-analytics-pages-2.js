@@ -1856,13 +1856,6 @@ const REPORT_GROUPS = [{
     label: "Forecast Reports",
     icon: "chart"
   }]
-}, {
-  group: "Official Report",
-  pages: [{
-    k: "customReport",
-    label: "Custom Report Generator",
-    icon: "printer"
-  }]
 }];
 const ALL_REPORT_PAGES = REPORT_GROUPS.flatMap(g => g.pages);
 
@@ -1958,6 +1951,7 @@ function ReportsTab({
   testTypes,
   testRecords,
   samples,
+  subBatches,
   users,
   notify,
   onLoadDemoData
@@ -2039,6 +2033,7 @@ function ReportsTab({
     rangeDays,
     batchNameById,
     samples,
+    subBatches,
     users,
     notify
   };
@@ -2047,6 +2042,7 @@ function ReportsTab({
   }
   const activePageDef = ALL_REPORT_PAGES.find(p => p.k === activePage);
   const activeGroupDef = REPORT_GROUPS.find(grp => grp.pages.some(p => p.k === activePage));
+  const [reportSection, setReportSection] = React.useState("analytics"); // "analytics" | "custom"
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between mb-4 no-print flex-wrap gap-3"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
@@ -2090,14 +2086,25 @@ function ReportsTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "printer",
     size: 13
-  }), "Print / Save as PDF"))), /*#__PURE__*/React.createElement(FilterPanel, {
+  }), "Print / Save as PDF"))), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2 mb-4 no-print"
+  }, [{ k: "analytics", label: "Reports & Analytics" }, { k: "custom", label: "Custom Report" }].map(t => /*#__PURE__*/React.createElement("button", {
+    key: t.k,
+    onClick: () => setReportSection(t.k),
+    className: "px-3 py-1.5 rounded text-sm font-medium",
+    style: {
+      background: reportSection === t.k ? C.teal : "#fff",
+      color: reportSection === t.k ? "#fff" : C.muted,
+      border: `1px solid ${reportSection === t.k ? C.teal : C.border}`
+    }
+  }, t.label))), reportSection === "analytics" && /*#__PURE__*/React.createElement(FilterPanel, {
     filters: filters,
     setFilters: setFilters,
     facets: facets
-  }), /*#__PURE__*/React.createElement(ReportGroupNav, {
+  }), reportSection === "analytics" && /*#__PURE__*/React.createElement(ReportGroupNav, {
     activePage: activePage,
     setReportTab: setReportTab
-  }), /*#__PURE__*/React.createElement("div", {
+  }), reportSection === "analytics" && /*#__PURE__*/React.createElement("div", {
     className: "mt-4"
-  }, activePage === "executive" && /*#__PURE__*/React.createElement(ExecutiveDashboardPage, shared), activePage === "insights" && /*#__PURE__*/React.createElement(SmartInsightsPage, shared), activePage === "testAnalytics" && /*#__PURE__*/React.createElement(TestAnalyticsPage, shared), activePage === "technician" && /*#__PURE__*/React.createElement(TechnicianPerformancePage, shared), activePage === "revenue" && /*#__PURE__*/React.createElement(RevenueAnalyticsPage, shared), activePage === "chemicalAnalytics" && /*#__PURE__*/React.createElement(ChemicalAnalyticsPage, shared), activePage === "inventoryAnalytics" && /*#__PURE__*/React.createElement(InventoryAnalyticsPage, shared), activePage === "glasswareAnalytics" && /*#__PURE__*/React.createElement(GlasswareAnalyticsPage, shared), activePage === "gasAnalytics" && /*#__PURE__*/React.createElement(GasAnalyticsPage, shared), activePage === "predictiveInventory" && /*#__PURE__*/React.createElement(PredictiveInventoryPage, shared), activePage === "equipmentAnalytics" && /*#__PURE__*/React.createElement(EquipmentAnalyticsPage, shared), activePage === "maintenanceAnalytics" && /*#__PURE__*/React.createElement(MaintenanceAnalyticsPage, shared), activePage === "monthlyTrends" && /*#__PURE__*/React.createElement(MonthlyTrendsPage, shared), activePage === "dailyTrends" && /*#__PURE__*/React.createElement(DailyTrendsPage, shared), activePage === "forecast" && /*#__PURE__*/React.createElement(ForecastPage, shared), activePage === "customReport" && /*#__PURE__*/React.createElement(CustomReportGeneratorPage, shared)));
+  }, activePage === "executive" && /*#__PURE__*/React.createElement(ExecutiveDashboardPage, shared), activePage === "insights" && /*#__PURE__*/React.createElement(SmartInsightsPage, shared), activePage === "testAnalytics" && /*#__PURE__*/React.createElement(TestAnalyticsPage, shared), activePage === "technician" && /*#__PURE__*/React.createElement(TechnicianPerformancePage, shared), activePage === "revenue" && /*#__PURE__*/React.createElement(RevenueAnalyticsPage, shared), activePage === "chemicalAnalytics" && /*#__PURE__*/React.createElement(ChemicalAnalyticsPage, shared), activePage === "inventoryAnalytics" && /*#__PURE__*/React.createElement(InventoryAnalyticsPage, shared), activePage === "glasswareAnalytics" && /*#__PURE__*/React.createElement(GlasswareAnalyticsPage, shared), activePage === "gasAnalytics" && /*#__PURE__*/React.createElement(GasAnalyticsPage, shared), activePage === "predictiveInventory" && /*#__PURE__*/React.createElement(PredictiveInventoryPage, shared), activePage === "equipmentAnalytics" && /*#__PURE__*/React.createElement(EquipmentAnalyticsPage, shared), activePage === "maintenanceAnalytics" && /*#__PURE__*/React.createElement(MaintenanceAnalyticsPage, shared), activePage === "monthlyTrends" && /*#__PURE__*/React.createElement(MonthlyTrendsPage, shared), activePage === "dailyTrends" && /*#__PURE__*/React.createElement(DailyTrendsPage, shared), activePage === "forecast" && /*#__PURE__*/React.createElement(ForecastPage, shared)), reportSection === "custom" && /*#__PURE__*/React.createElement(CustomReportSection, shared));
 }

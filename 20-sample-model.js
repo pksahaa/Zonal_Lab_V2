@@ -17,6 +17,22 @@
 // ============================================================================
 
 // ---- status catalogue -------------------------------------------------
+// Quick client categorization on the sample itself (separate from the
+// richer, optional Reference link — matches the "Client Type *" field on
+// the registration form).
+const CLIENT_TYPES = [
+  { value: "DPHE", label: "DPHE" },
+  { value: "Private", label: "Private / Public Institution" },
+  { value: "Individual", label: "Individual / Walk-in" },
+];
+const WATER_POINT_TYPES = [
+  { value: "TubeWell", label: "Tube Well" },
+  { value: "RingWell", label: "Ring Well" },
+  { value: "Pond", label: "Pond" },
+  { value: "PipedSupply", label: "Piped Supply" },
+  { value: "River", label: "River / Surface Water" },
+  { value: "Other", label: "Other" },
+];
 const SAMPLE_STATUSES = [{
   key: "registered",
   label: "Registered",
@@ -157,6 +173,11 @@ function createSample(fields, existingSamples, user) {
     id: uid("smp"),
     sampleCode: generateSampleCode(existingSamples, fields.collectionDate),
     clientName: fields.clientName || "",
+    // "Customer Name" in the form
+    clientType: fields.clientType || "",
+    // DPHE / Private / Individual — required, quick categorization (separate
+    // from the optional, richer Reference link below)
+    fatherHusbandName: fields.fatherHusbandName || "",
     siteLocation: fields.siteLocation || "",
     // Administrative address hierarchy + caretaker/source — needed for the
     // official lab report format (District > Upazila/City Corp > Union/Pourashava
@@ -166,11 +187,17 @@ function createSample(fields, existingSamples, user) {
     upazila: fields.upazila || "",
     union: fields.union || "",
     village: fields.village || "",
+    latitude: fields.latitude || "",
+    longitude: fields.longitude || "",
     caretakerName: fields.caretakerName || "",
     sampleSourceId: fields.sampleSourceId || "",
     // e.g. "STW-6"
+    waterPointType: fields.waterPointType || "",
+    // e.g. Tube Well / Pond / Ring Well / Piped Supply
+    sampleTypeText: fields.sampleTypeText || "",
+    // free text, e.g. "Tube well water" — what's actually written on the report
     referenceId: fields.referenceId || null,
-    // links to a Reference (18-reference-model.js) — who sent this sample
+    // links to a Reference (18-reference-model.js) — who sent this sample; optional
     batchRef: fields.batchRef || "",
     // shared reference (e.g. office memo no.) linking samples uploaded together
     matrix: fields.matrix || "Drinking Water",
@@ -382,7 +409,7 @@ function getRequestedTestStatus(sample, testTypeId, testRecords, batches) {
     if (sample.status === "under_review") return "under_review";
     return "result_entered";
   }
-  const reserved = (batches || []).some(b => b.status === "pending" && (b.memberSampleIds ? b.memberSampleIds.includes(sample.id) && b.testTypeId === testTypeId : (b.members || []).some(m => m.sampleId === sample.id && m.testTypeId === testTypeId)));
+  const reserved = (batches || []).some(b => (b.members || []).some(m => m.sampleId === sample.id && m.testTypeId === testTypeId) && batchGroupStatus(b, testTypeId, testRecords) === "pending");
   return reserved ? "batched" : "pending";
 }
 
