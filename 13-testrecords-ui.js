@@ -25,7 +25,9 @@ function AddTestTab({
   goToSample,
   editingRecord,
   onDoneEditing,
-  goToTestTypes
+  goToTestTypes,
+  preselectSubBatchId,
+  onPreselectHandled
 }) {
   const [selectedSampleId, setSelectedSampleId] = useState("");
   const [selectedSubBatchId, setSelectedSubBatchId] = useState("");
@@ -34,6 +36,16 @@ function AddTestTab({
   // How the technician is choosing what to record results for — a clear
   // 3-way choice instead of two dropdowns shown side by side with "OR".
   const [selectionMode, setSelectionMode] = useState("individual"); // "individual" | "batch" | "subbatch"
+  // Deep-link from Results Workflow's "Pending Upload" queue — jump
+  // straight into Sub-Batch mode with that Sub-Batch preselected.
+  React.useEffect(() => {
+    if (preselectSubBatchId) {
+      setSelectionMode("subbatch");
+      setSelectedSubBatchId(preselectSubBatchId);
+      onPreselectHandled?.();
+    }
+    // eslint-disable-next-line
+  }, [preselectSubBatchId]);
   const [selectedReferenceId, setSelectedReferenceId] = useState("");
   const [batchModeTestId, setBatchModeTestId] = useState("");
   const [memberInputs, setMemberInputs] = useState({}); // { [sampleId]: { [paramId]: { [inputKey]: value } } } — sub-batch mode only
@@ -1820,14 +1832,12 @@ function TestRecordsTab({
   testTypes,
   session,
   goToSample,
+  goToResultsWorkflow,
   notify,
   onEditRecord
 }) {
   const [deleteRecord, setDeleteRecord] = useState(null);
   const [bulkUploadRecord, setBulkUploadRecord] = useState(null);
-  const [returningRecordId, setReturningRecordId] = useState(null);
-  const [returnNoteText, setReturnNoteText] = useState("");
-  const [approvingRecordId, setApprovingRecordId] = useState(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState({});
@@ -2154,69 +2164,21 @@ function TestRecordsTab({
         }));
       }))));
 
-      const reviewActionsBlock = (sb && sb.status === "tested" && setSamples) ? /*#__PURE__*/React.createElement("div", {
+      const reviewActionsBlock = (sb && ["tested", "reviewed", "approved"].includes(sb.status)) ? /*#__PURE__*/React.createElement("div", {
         className: "flex items-center gap-2 mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        variant: "outline",
-        onClick: () => reviewSubBatchApprove(sb, samples, setSamples, setSubBatches, session, notify)
-      }, "Mark Reviewed"), /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        variant: "ghost",
-        onClick: () => {
-          setReturningRecordId(r.id);
-          setReturnNoteText("");
-        }
-      }, "Return to Analyst")) : null;
-
-      const returnPanel = returningRecordId === r.id ? /*#__PURE__*/React.createElement("div", {
-        className: "mt-2 p-2 rounded",
-        style: { background: C.warnBg }
-      }, /*#__PURE__*/React.createElement(TextField, {
-        simple: true,
-        label: "Note for the analyst (optional)",
-        value: returnNoteText,
-        onChange: setReturnNoteText
-      }), /*#__PURE__*/React.createElement("div", {
-        className: "flex justify-end gap-2 mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        variant: "ghost",
-        size: "sm",
-        onClick: () => setReturningRecordId(null)
-      }, "Cancel"), /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => {
-          reviewSubBatchReturn(sb, samples, setSamples, setSubBatches, session, notify, returnNoteText);
-          setReturningRecordId(null);
-        }
-      }, "Confirm Return"))) : null;
-
-      const finalApproveButton = (sb && sb.status === "reviewed" && approvingRecordId !== r.id) ? /*#__PURE__*/React.createElement("div", {
-        className: "mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => setApprovingRecordId(r.id)
-      }, "Final Approve")) : null;
-
-      const finalApprovePanel = (sb && sb.status === "reviewed" && approvingRecordId === r.id) ? /*#__PURE__*/React.createElement(SignatureCapture, {
-        user: session,
-        label: `Final Approval — ${sb.testTypeName} for ${(sb.memberSampleIds || []).length} sample(s) in ${sb.label}`,
-        onConfirm: payload => {
-          bulkApproveSubBatch(sb, samples, setSamples, setSubBatches, session, notify, payload);
-          setApprovingRecordId(null);
-        }
-      }) : null;
-
-      const releaseButton = (sb && sb.status === "approved") ? /*#__PURE__*/React.createElement("div", {
-        className: "mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => bulkReleaseSubBatch(sb, samples, setSamples, setSubBatches, session, notify)
-      }, "Release")) : null;
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "text-xs",
+        style: { color: C.muted }
+      }, "Review/Approve/Release moved to "), /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "text-xs underline",
+        style: { color: C.teal },
+        onClick: () => goToResultsWorkflow?.()
+      }, "Results Workflow →")) : null;
 
       return /*#__PURE__*/React.createElement("div", {
         className: "col-span-2 md:col-span-3"
-      }, headerLine, memberListDiv, reviewActionsBlock, returnPanel, finalApproveButton, finalApprovePanel, releaseButton);
+      }, headerLine, memberListDiv, reviewActionsBlock);
     })(), r.sampleId && !r.memberSampleIds && (() => {
       // Individual (non-Sub-Batch) record — same review controls, applied
       // directly to this one (sample, testType) pair since there's no
@@ -2247,87 +2209,21 @@ function TestRecordsTab({
         style: { background: testStageChipStyle(rt.status).bg, color: testStageChipStyle(rt.status).fg }
       }, testStageLabel(rt.status)));
 
-      const reviewActionsBlock = rt.status !== "results_entered" ? null : /*#__PURE__*/React.createElement("div", {
+      const reviewActionsBlock = ["results_entered", "under_review", "approved"].includes(rt.status) ? /*#__PURE__*/React.createElement("div", {
         className: "flex items-center gap-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        variant: "outline",
-        onClick: () => {
-          const updated = setRequestedTestStatus(sample, r.testTypeId, "under_review", session);
-          setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
-          notify?.(`${sample.sampleCode} marked reviewed for ${r.testTypeName}.`, "ok");
-        }
-      }, "Mark Reviewed"), /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        variant: "ghost",
-        onClick: () => {
-          setReturningRecordId(r.id);
-          setReturnNoteText("");
-        }
-      }, "Return to Analyst"));
-
-      const returnPanel = returningRecordId !== r.id ? null : /*#__PURE__*/React.createElement("div", {
-        className: "mt-2 p-2 rounded",
-        style: { background: C.warnBg }
-      }, /*#__PURE__*/React.createElement(TextField, {
-        simple: true,
-        label: "Note for the analyst (optional)",
-        value: returnNoteText,
-        onChange: setReturnNoteText
-      }), /*#__PURE__*/React.createElement("div", {
-        className: "flex justify-end gap-2 mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        variant: "ghost",
-        size: "sm",
-        onClick: () => setReturningRecordId(null)
-      }, "Cancel"), /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => {
-          const updated = setRequestedTestStatus(sample, r.testTypeId, "in_progress", session, returnNoteText.trim() || `Returned to analyst for ${r.testTypeName}.`);
-          setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
-          notify?.(`${sample.sampleCode} returned to analyst.`, "warn");
-          setReturningRecordId(null);
-        }
-      }, "Confirm Return")));
-
-      // Final Approve — same signature-gated decision as Sub-Batch mode,
-      // just applied to this single (sample, testType) pair.
-      const finalApproveButton = (rt.status === "under_review" && approvingRecordId !== r.id) ? /*#__PURE__*/React.createElement("div", {
-        className: "mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => setApprovingRecordId(r.id)
-      }, "Final Approve")) : null;
-
-      const finalApprovePanel = (rt.status === "under_review" && approvingRecordId === r.id) ? /*#__PURE__*/React.createElement(SignatureCapture, {
-        user: session,
-        label: `Final Approval — ${r.testTypeName} for ${sample.sampleCode}`,
-        onConfirm: payload => {
-          const result = bulkDecideParameter([sample], r.testTypeId, r.testTypeName, payload, session);
-          if (result.updated.length) {
-            setSamples(prev => prev.map(s => s.id === sample.id ? result.updated[0] : s), result.updated[0]);
-            notify?.(payload.decision === "approved" ? `${sample.sampleCode} approved for ${r.testTypeName}.` : `${sample.sampleCode} sent back to analyst for ${r.testTypeName}.`, payload.decision === "approved" ? "ok" : "warn");
-          }
-          setApprovingRecordId(null);
-        }
-      }) : null;
-
-      const releaseButton = rt.status !== "approved" ? null : /*#__PURE__*/React.createElement("div", {
-        className: "mt-2"
-      }, /*#__PURE__*/React.createElement(Button, {
-        size: "sm",
-        onClick: () => {
-          const result = bulkReleaseParameter([sample], r.testTypeId, r.testTypeName, session);
-          if (result.updated.length) {
-            setSamples(prev => prev.map(s => s.id === sample.id ? result.updated[0] : s), result.updated[0]);
-            notify?.(`${sample.sampleCode} released for ${r.testTypeName}.`, "ok");
-          }
-        }
-      }, "Release"));
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "text-xs",
+        style: { color: C.muted }
+      }, "Review/Approve/Release moved to "), /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "text-xs underline",
+        style: { color: C.teal },
+        onClick: () => goToResultsWorkflow?.()
+      }, "Results Workflow →")) : null;
 
       return /*#__PURE__*/React.createElement("div", {
         className: "col-span-2 md:col-span-3"
-      }, headerLine, reviewActionsBlock, returnPanel, finalApproveButton, finalApprovePanel, releaseButton);
+      }, headerLine, reviewActionsBlock);
     })(), (r.results || []).filter(res => res.value !== null).length > 0 && /*#__PURE__*/React.createElement("div", {
       className: "col-span-2 md:col-span-3"
     }, /*#__PURE__*/React.createElement("div", {

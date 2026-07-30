@@ -30,11 +30,37 @@ style.css                           # global styles
 16-sub-batch.js                     # Sub-Batch model + getSampleResultForTest lookup
 17-report-generator.js              # Custom Report Generator (official DPHE report format)
 20-sample-model.js                  # sample lifecycle/status logic
-21-sample-ui.js                     # SamplesTab (Samples + Sub-Batches sub-tabs), forms, QC banner, bulk manifest upload
+21-sample-ui.js                     # SamplesTab (Samples Registration + Create Analytical Batch sub-tabs), forms, QC banner, bulk manifest upload
+22-results-workflow-ui.js           # Samples tab's 3rd sub-tab: Upload/Review/Approve/Release, consolidated + role-gated (see note below)
 30-dashboard.js                     # DashboardTab, SampleKpiStrip
 40-auth-ui.js                       # LoginPage
 99-app.js                           # AppRoot, LabApp, ReactDOM.render
 ```
+
+## 2026-07-30 — Results Workflow consolidation
+
+"Upload results / Review / Approve / Release" used to be scattered across
+three places: Sample Detail's per-parameter buttons + whole-sample signature
+panel, Create Analytical Batch's per-row buttons, and its "Batch Actions"
+toolbar (Batch Approve/Release by Reference). All three are now **read-only
+status + a deep-link** — the actions themselves live in one place: Samples →
+**Results Workflow** (`22-results-workflow-ui.js`), reached via
+`goToResultsWorkflow()` in `99-app.js`.
+
+- Groups by `testTypeId` across **all** samples needing a step, regardless of
+  whether they were tested via a Sub-Batch, Batch(Reference) mode, or an
+  individual entry — one queue per step, not per grouping mechanism.
+- Role-gated using the existing `permissionsFor()` (`20-sample-model.js`):
+  a stage is hidden entirely (not just disabled) unless the signed-in role
+  has that permission. Technician (the "Analyzer" role) has
+  `canEnterResults` only, so it sees **only** Pending Upload.
+- No new decision logic — every action calls the same
+  `bulkDecideParameter` / `bulkReleaseParameter` / `setRequestedTestStatus`
+  functions the old locations used.
+- "Matrix" field in Sample Detail's edit view was renamed to "Sample Type"
+  to match the Registration form's label for the same underlying
+  `sample.matrix` field (was previously two different labels for one field).
+
 
 ## Why this split
 

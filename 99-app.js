@@ -66,6 +66,21 @@ function LabApp({
     setFocusSampleId(sampleId);
     setTab("samples");
   }
+  // Same pattern as goToSample — jumps to the Samples tab's "Results
+  // Workflow" sub-tab (Upload/Review/Approve/Release consolidated there;
+  // see 22-results-workflow-ui.js).
+  const [focusSamplesSubTab, setFocusSamplesSubTab] = useState(null);
+  function goToResultsWorkflow() {
+    setFocusSamplesSubTab("resultsWorkflow");
+    setTab("samples");
+  }
+  // Deep-link from the Results Workflow "Pending Upload" queue straight
+  // into Add Test Record, optionally preselecting a Sub-Batch.
+  const [entrySubBatchId, setEntrySubBatchId] = useState(undefined);
+  function goToTestEntry(subBatchId) {
+    setEntrySubBatchId(subBatchId || null);
+    setTab("addTest");
+  }
   const [invTab, setInvTab] = useState("equipment");
   const [reportTab, setReportTab] = useState("executive");
   // Header used to line up 6 always-visible controls (lang, theme, backend
@@ -511,7 +526,10 @@ function LabApp({
     session: session,
     notify: notify,
     focusSampleId: focusSampleId,
-    setFocusSampleId: setFocusSampleId
+    setFocusSampleId: setFocusSampleId,
+    focusSamplesSubTab: focusSamplesSubTab,
+    setFocusSamplesSubTab: setFocusSamplesSubTab,
+    goToTestEntry: goToTestEntry
   }) : /*#__PURE__*/React.createElement("div", {
     className: "p-8 text-sm",
     style: {
@@ -565,7 +583,9 @@ function LabApp({
     goToSample: goToSample,
     editingRecord: editingRecord,
     onDoneEditing: () => setEditingRecord(null),
-    goToTestTypes: () => setTab("testTypes")
+    goToTestTypes: () => setTab("testTypes"),
+    preselectSubBatchId: entrySubBatchId,
+    onPreselectHandled: () => setEntrySubBatchId(undefined)
   }), tab === "testRecords" && /*#__PURE__*/React.createElement(TestRecordsTab, {
     testRecords: testRecords,
     setTestRecords: setTestRecords,
@@ -581,6 +601,7 @@ function LabApp({
     testTypes: testTypes,
     session: session,
     goToSample: goToSample,
+    goToResultsWorkflow: goToResultsWorkflow,
     notify: notify,
     onEditRecord: r => {
       setEditingRecord(r);
