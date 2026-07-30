@@ -56,8 +56,28 @@ function LabApp({
 }) {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("dashboard");
+  // Sample Detail (in the Samples tab) is the single source of truth for
+  // "everything about this sample" — Test Record UI, QC Module, and the
+  // Report Generator each used to show their own ad-hoc slice of a sample
+  // instead of linking to it. This is the shared piece of navigation state
+  // that lets any of them jump straight there.
+  const [focusSampleId, setFocusSampleId] = useState(null);
+  function goToSample(sampleId) {
+    setFocusSampleId(sampleId);
+    setTab("samples");
+  }
   const [invTab, setInvTab] = useState("equipment");
   const [reportTab, setReportTab] = useState("executive");
+  // Header used to line up 6 always-visible controls (lang, theme, backend
+  // settings, lab identity, user pill, logout) — crowded on anything less
+  // than a wide desktop. Backend/Lab Identity now live behind one
+  // "Settings" popover, and the user pill + Log Out behind one user menu.
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  function closeHeaderMenus() {
+    setSettingsMenuOpen(false);
+    setUserMenuOpen(false);
+  }
   const [theme, setTheme] = useState(() => loadKey("theme", "light"));
   const [lang, setLangState] = useState(() => loadKey("lang", "en"));
   applyTheme(theme);
@@ -80,7 +100,6 @@ function LabApp({
   const [testTypes, setTestTypes] = useState([]);
   const [testRecords, setTestRecords] = useState([]);
   const [subBatches, setSubBatches] = useState([]);
-  const [references, setReferences] = useState([]);
   const [toast, setToast] = useState(null);
   const [editingRecord, setEditingRecord] = useState(null);
   const [showBackendSettings, setShowBackendSettings] = useState(false);
@@ -112,6 +131,51 @@ function LabApp({
       });
     }
   }, [session.name, session.role]);
+
+  // >>> PHASE 1: Reference collection — the real source-of-truth for who a
+  // sample came from (DPHE / institution / walk-in) + their letter/ref no.,
+  // replacing the old free-text Sample.batchRef. Same DataService pattern
+  // as samples above.
+  const [references, setReferencesState] = useState([]);
+  const [referencesLoaded, setReferencesLoaded] = useState(false);
+  useEffect(() => {
+    DataService.list("references").then(list => {
+      setReferencesState(list);
+      setReferencesLoaded(true);
+    });
+  }, []);
+  const setReferences = useCallback(async (updater, changedRecord) => {
+    setReferencesState(prev => updater(prev));
+    if (changedRecord) {
+      await DataService.save("references", changedRecord);
+    }
+  }, []);
+  // One-time, idempotent migration: any sample already carrying a
+  // referenceId (and requestedTests already carrying a status) is left
+  // untouched. Runs once every collection involved has loaded, and only
+  // writes anything if there's actually legacy data to migrate.
+  const [migrationChecked, setMigrationChecked] = useState(false);
+  useEffect(() => {
+    if (!samplesLoaded || !referencesLoaded || !loaded || migrationChecked) return;
+    setMigrationChecked(true);
+    const needsReferenceMigration = samples.some(s => !s.referenceId);
+    const needsStatusBackfill = samples.some(s => (s.requestedTests || []).some(rt => !rt.status));
+    if (!needsReferenceMigration && !needsStatusBackfill) return;
+    let workingSamples = samples;
+    let workingReferences = references;
+    if (needsReferenceMigration) {
+      const migrated = migrateBatchRefsToReferences(workingSamples, workingReferences);
+      workingReferences = migrated.references;
+      workingSamples = migrated.samples;
+    }
+    if (needsStatusBackfill) {
+      workingSamples = backfillRequestedTestStatuses(workingSamples, testRecords, subBatches);
+    }
+    setReferencesState(workingReferences);
+    setSamplesState(workingSamples);
+    DataService.bulkSet("references", workingReferences);
+    DataService.bulkSet("samples", workingSamples);
+  }, [samplesLoaded, referencesLoaded, loaded, migrationChecked, samples, references, testRecords, subBatches]);
   useEffect(() => {
     const chems = markExpiredBatches(normalizeChemicals(loadKey("chemicals", seedChemicals())));
     const equip = normalizeEquipment(loadKey("equipment", seedEquipment()));
@@ -125,8 +189,7 @@ function LabApp({
       ...t
     })));
     setTestRecords(loadKey("testRecords", []));
-    setSubBatches(normalizeBatches(loadKey("subBatches", [])));
-    setReferences(loadKey("references", []));
+    setSubBatches(loadKey("subBatches", []));
     setLoaded(true);
   }, []);
   useEffect(() => {
@@ -153,9 +216,6 @@ function LabApp({
   useEffect(() => {
     if (loaded) saveKey("subBatches", subBatches);
   }, [subBatches, loaded]);
-  useEffect(() => {
-    if (loaded) saveKey("references", references);
-  }, [references, loaded]);
   const notify = useCallback((msg, tone = "ok") => {
     setToast({
       msg,
@@ -163,6 +223,9 @@ function LabApp({
     });
     setTimeout(() => setToast(null), 3200);
   }, []);
+  // A failed localStorage save/load now surfaces as a toast instead of
+  // failing silently — see reportStorageError() in 00-core.js.
+  registerStorageErrorHandler(notify);
   const loadDemoReportData = useCallback(() => {
     const demo = buildDemoReportData();
     const chems = markExpiredBatches(normalizeChemicals(demo.chemicals));
@@ -212,16 +275,16 @@ function LabApp({
   }, t("appName")), /*#__PURE__*/React.createElement("div", {
     className: "text-xs",
     style: {
-      color: "#BFE3E0"
+      color: C.headerTextMuted
     }
   }, t("appSub"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2 text-xs no-print",
+    className: "flex items-center gap-2 text-xs no-print relative",
     style: {
-      color: "#DDF2F0"
+      color: C.headerText
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: toggleLang,
-    className: "flex items-center gap-1 px-2 py-1 rounded",
+    className: "flex items-center gap-1 px-2 py-1 rounded hover:bg-white/10 transition-colors",
     style: {
       background: "rgba(255,255,255,0.12)",
       color: "#fff"
@@ -232,7 +295,7 @@ function LabApp({
     size: 13
   }), lang === "en" ? "বাংলা" : "EN"), /*#__PURE__*/React.createElement("button", {
     onClick: toggleTheme,
-    className: "flex items-center gap-1 px-2 py-1 rounded",
+    className: "flex items-center gap-1 px-2 py-1 rounded hover:bg-white/10 transition-colors",
     style: {
       background: "rgba(255,255,255,0.12)",
       color: "#fff"
@@ -241,53 +304,136 @@ function LabApp({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: theme === "dark" ? "sun" : "moon",
     size: 13
-  })), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowBackendSettings(true),
-    className: "flex items-center gap-1 px-2 py-1 rounded",
+  })),
+  /* ---- Settings popover: Backend Settings + Lab Identity ---- */
+  /*#__PURE__*/React.createElement("div", {
+    className: "relative"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setUserMenuOpen(false);
+      setSettingsMenuOpen(o => !o);
+    },
+    className: "flex items-center gap-1 px-2 py-1 rounded hover:bg-white/10 transition-colors",
     style: {
-      background: "rgba(255,255,255,0.12)",
+      background: settingsMenuOpen ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.12)",
       color: "#fff"
     },
-    title: "Backend settings"
+    title: "Settings"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "wrench",
+    size: 13
+  }), "Settings", /*#__PURE__*/React.createElement(Icon, {
+    name: "chevronDown",
+    size: 11
+  })), settingsMenuOpen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0",
+    style: {
+      zIndex: 40
+    },
+    onClick: closeHeaderMenus
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "absolute right-0 top-full mt-1.5 w-52 rounded-lg shadow-xl py-1 text-left",
+    style: {
+      background: C.card,
+      border: `1px solid ${C.border}`,
+      zIndex: 50
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setShowBackendSettings(true);
+      closeHeaderMenus();
+    },
+    className: "w-full flex items-center gap-2 text-left px-3 py-2 text-xs hover:bg-black/5",
+    style: {
+      color: C.ink
+    }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "link",
-    size: 13
-  }), "Backend"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowLabIdentitySettings(true),
-    className: "flex items-center gap-1 px-2 py-1 rounded",
-    style: {
-      background: "rgba(255,255,255,0.12)",
-      color: "#fff"
+    size: 13,
+    color: C.muted
+  }), "Backend Settings"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setShowLabIdentitySettings(true);
+      closeHeaderMenus();
     },
-    title: "Lab identity / report letterhead"
+    className: "w-full flex items-center gap-2 text-left px-3 py-2 text-xs hover:bg-black/5",
+    style: {
+      color: C.ink
+    }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "clipboard",
-    size: 13
-  }), "Lab Identity"), /*#__PURE__*/React.createElement("span", {
-    className: "rounded-full p-1.5",
+    size: 13,
+    color: C.muted
+  }), "Lab Identity / Letterhead")))),
+  /* ---- User popover: role + Log Out ---- */
+  /*#__PURE__*/React.createElement("div", {
+    className: "relative"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setSettingsMenuOpen(false);
+      setUserMenuOpen(o => !o);
+    },
+    className: "flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded hover:bg-white/10 transition-colors",
     style: {
-      background: "rgba(255,255,255,0.15)"
+      background: userMenuOpen ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.12)",
+      color: "#fff"
+    },
+    title: "Account"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "rounded-full p-1",
+    style: {
+      background: "rgba(255,255,255,0.2)"
     }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "user",
-    size: 14,
+    size: 12,
     color: "#fff"
-  })), /*#__PURE__*/React.createElement("span", null, session.name, " ", /*#__PURE__*/React.createElement("span", {
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "max-w-[110px] truncate"
+  }, session.name), /*#__PURE__*/React.createElement(Icon, {
+    name: "chevronDown",
+    size: 11
+  })), userMenuOpen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0",
     style: {
-      color: "#9FCFCB"
-    }
-  }, "· ", session.role)), /*#__PURE__*/React.createElement("button", {
-    onClick: onLogout,
-    className: "flex items-center gap-1 px-2 py-1 rounded",
-    style: {
-      background: "rgba(255,255,255,0.12)",
-      color: "#fff"
+      zIndex: 40
     },
-    title: "Log out"
+    onClick: closeHeaderMenus
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "absolute right-0 top-full mt-1.5 w-56 rounded-lg shadow-xl py-1 text-left",
+    style: {
+      background: C.card,
+      border: `1px solid ${C.border}`,
+      zIndex: 50
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-3 py-2",
+    style: {
+      borderBottom: `1px solid ${C.border}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold",
+    style: {
+      color: C.ink
+    }
+  }, session.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs",
+    style: {
+      color: C.muted
+    }
+  }, session.role)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      closeHeaderMenus();
+      onLogout();
+    },
+    className: "w-full flex items-center gap-2 text-left px-3 py-2 text-xs hover:bg-black/5 mt-1",
+    style: {
+      color: C.warn
+    }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "logout",
     size: 13
-  }), t("logOut")))), /*#__PURE__*/React.createElement("div", {
+  }), t("logOut"))))))), /*#__PURE__*/React.createElement("div", {
     className: "max-w-6xl mx-auto px-5 flex gap-1 flex-wrap no-print"
   }, [{
     k: "dashboard",
@@ -327,10 +473,11 @@ function LabApp({
       if (t.k !== "addTest") setEditingRecord(null);
       setTab(t.k);
     },
-    className: "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t",
+    className: `flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t border-b-2 transition-colors ${tab === t.k ? "" : "hover:bg-white/10 hover:text-white"}`,
     style: {
-      color: tab === t.k ? C.tealDark : "#DDF2F0",
-      background: tab === t.k ? C.bg : "transparent"
+      color: tab === t.k ? C.tealDark : C.headerText,
+      background: tab === t.k ? C.bg : "transparent",
+      borderBottomColor: tab === t.k ? C.mint : "transparent"
     }
   }, /*#__PURE__*/React.createElement(Icon, {
     name: t.icon,
@@ -353,17 +500,18 @@ function LabApp({
   })), tab === "samples" && (samplesLoaded ? /*#__PURE__*/React.createElement(SamplesTab, {
     samples: samples,
     setSamples: setSamples,
-    testTypes: testTypes,
-    testRecords: testRecords,
-    setTestRecords: setTestRecords,
-    subBatches: subBatches,
-    setSubBatches: setSubBatches,
     references: references,
     setReferences: setReferences,
+    testTypes: testTypes,
+    testRecords: testRecords,
+    subBatches: subBatches,
+    setSubBatches: setSubBatches,
     equipment: equipment,
     users: users,
     session: session,
-    notify: notify
+    notify: notify,
+    focusSampleId: focusSampleId,
+    setFocusSampleId: setFocusSampleId
   }) : /*#__PURE__*/React.createElement("div", {
     className: "p-8 text-sm",
     style: {
@@ -409,10 +557,12 @@ function LabApp({
     setTestRecords: setTestRecords,
     samples: samples,
     setSamples: setSamples,
+    references: references,
     subBatches: subBatches,
     setSubBatches: setSubBatches,
     session: session,
     notify: notify,
+    goToSample: goToSample,
     editingRecord: editingRecord,
     onDoneEditing: () => setEditingRecord(null),
     goToTestTypes: () => setTab("testTypes")
@@ -427,8 +577,10 @@ function LabApp({
     setSamples: setSamples,
     subBatches: subBatches,
     setSubBatches: setSubBatches,
+    references: references,
     testTypes: testTypes,
     session: session,
+    goToSample: goToSample,
     notify: notify,
     onEditRecord: r => {
       setEditingRecord(r);
@@ -444,9 +596,13 @@ function LabApp({
     testTypes: testTypes,
     testRecords: testRecords,
     samples: samples,
+    setSamples: setSamples,
+    references: references,
     subBatches: subBatches,
     users: users,
+    session: session,
     notify: notify,
+    goToSample: goToSample,
     onLoadDemoData: loadDemoReportData
   }), tab === "qc" && /*#__PURE__*/React.createElement(QcModuleTab, {
     testTypes: testTypes,

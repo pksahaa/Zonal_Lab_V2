@@ -17,22 +17,6 @@
 // ============================================================================
 
 // ---- status catalogue -------------------------------------------------
-// Quick client categorization on the sample itself (separate from the
-// richer, optional Reference link — matches the "Client Type *" field on
-// the registration form).
-const CLIENT_TYPES = [
-  { value: "DPHE", label: "DPHE" },
-  { value: "Private", label: "Private / Public Institution" },
-  { value: "Individual", label: "Individual / Walk-in" },
-];
-const WATER_POINT_TYPES = [
-  { value: "TubeWell", label: "Tube Well" },
-  { value: "RingWell", label: "Ring Well" },
-  { value: "Pond", label: "Pond" },
-  { value: "PipedSupply", label: "Piped Supply" },
-  { value: "River", label: "River / Surface Water" },
-  { value: "Other", label: "Other" },
-];
 const SAMPLE_STATUSES = [{
   key: "registered",
   label: "Registered",
@@ -117,6 +101,80 @@ function nextAllowedStatuses(sample) {
   return base;
 }
 
+// ============================================================================
+// PER-PARAMETER STATUS ROLLUP (Phase 3) — requestedTests[].status is now the
+// real, stored source of truth for where each individual parameter sits in
+// the pipeline. Sample.status becomes a derived ROLLUP: the least-advanced
+// ("bottleneck") parameter decides where the sample as a whole shows up in
+// status filters/dashboards — a sample isn't "Approved" until every
+// parameter it requested is. registered/received/on_hold/rejected/cancelled
+// are untouched by this — those are custody decisions about the physical
+// sample, not about any one parameter's testing progress.
+// ============================================================================
+const TEST_STATUS_RANK = {
+  pending: 0,
+  in_progress: 1,
+  results_entered: 2,
+  under_review: 3,
+  approved: 4,
+  released: 5
+};
+const RANK_TO_SAMPLE_STATUS = {
+  0: "assigned",
+  1: "in_progress",
+  2: "results_entered",
+  3: "under_review",
+  4: "approved",
+  5: "released"
+};
+const SAMPLE_ROLLUP_ELIGIBLE = ["registered", "received", "assigned", "in_progress", "results_entered", "under_review", "approved", "released"];
+function rollupSampleStatus(sample) {
+  if (!SAMPLE_ROLLUP_ELIGIBLE.includes(sample.status)) return sample.status;
+  if (!sample.requestedTests || !sample.requestedTests.length) return sample.status;
+  const ranks = sample.requestedTests.map(rt => TEST_STATUS_RANK[rt.status] ?? 0);
+  return RANK_TO_SAMPLE_STATUS[Math.min(...ranks)];
+}
+
+// Pure updater: move ONE requestedTest to a new status, then re-sync the
+// whole-sample `status` field as a rollup. Every place that changes a
+// parameter's status (test-record save, Sub-Batch review, single-parameter
+// review, report release) goes through this one function so the rollup is
+// never forgotten or done inconsistently.
+function setRequestedTestStatus(sample, testTypeId, newStatus, user, note) {
+  const target = (sample.requestedTests || []).find(rt => rt.testTypeId === testTypeId);
+  if (!target || target.status === newStatus) return sample; // no-op, nothing to log
+  const nextRequestedTests = sample.requestedTests.map(rt => rt.testTypeId === testTypeId ? {
+    ...rt,
+    status: newStatus
+  } : rt);
+  const withTests = {
+    ...sample,
+    requestedTests: nextRequestedTests
+  };
+  const rolled = rollupSampleStatus(withTests);
+  const next = {
+    ...withTests,
+    status: rolled
+  };
+  return addCustodyEvent(next, {
+    action: rolled === sample.status ? `Parameter update: ${target.testTypeName}` : `Status → ${sampleStatusMeta(rolled).label}`,
+    toUser: user?.name,
+    notes: note || `${target.testTypeName}: ${newStatus.replace(/_/g, " ")}.`
+  }, user);
+}
+
+// Bulk-move every requestedTest currently sitting at any of `fromStatuses`
+// up to `toStatus` — used when a whole-sample, signature-gated decision
+// (addApproval / releaseResults) needs to bring every parameter waiting at
+// that stage forward together, in one go.
+function syncRequestedTestsToStage(sample, fromStatuses, toStatus, user, note) {
+  let next = sample;
+  (sample.requestedTests || []).filter(rt => fromStatuses.includes(rt.status)).forEach(rt => {
+    next = setRequestedTestStatus(next, rt.testTypeId, toStatus, user, note);
+  });
+  return next;
+}
+
 // ---- roles / permissions (additive — existing Administrator/Technician
 // users keep working unchanged; these two roles are optional extras a lab
 // can create for approval segregation-of-duties) ----
@@ -173,11 +231,6 @@ function createSample(fields, existingSamples, user) {
     id: uid("smp"),
     sampleCode: generateSampleCode(existingSamples, fields.collectionDate),
     clientName: fields.clientName || "",
-    // "Customer Name" in the form
-    clientType: fields.clientType || "",
-    // DPHE / Private / Individual — required, quick categorization (separate
-    // from the optional, richer Reference link below)
-    fatherHusbandName: fields.fatherHusbandName || "",
     siteLocation: fields.siteLocation || "",
     // Administrative address hierarchy + caretaker/source — needed for the
     // official lab report format (District > Upazila/City Corp > Union/Pourashava
@@ -187,26 +240,34 @@ function createSample(fields, existingSamples, user) {
     upazila: fields.upazila || "",
     union: fields.union || "",
     village: fields.village || "",
+    caretakerName: fields.caretakerName || "",
+    fatherHusbandName: fields.fatherHusbandName || "",
     latitude: fields.latitude || "",
     longitude: fields.longitude || "",
-    caretakerName: fields.caretakerName || "",
+    waterPointType: fields.waterPointType || "",
+    waterPointTypeOther: fields.waterPointTypeOther || "",
     sampleSourceId: fields.sampleSourceId || "",
     // e.g. "STW-6"
-    waterPointType: fields.waterPointType || "",
-    // e.g. Tube Well / Pond / Ring Well / Piped Supply
-    sampleTypeText: fields.sampleTypeText || "",
-    // free text, e.g. "Tube well water" — what's actually written on the report
-    referenceId: fields.referenceId || null,
-    // links to a Reference (18-reference-model.js) — who sent this sample; optional
     batchRef: fields.batchRef || "",
     // shared reference (e.g. office memo no.) linking samples uploaded together
+    referenceId: fields.referenceId || "",
+    // FK -> Reference (19-reference-model.js) — the real source-of-truth for
+    // who this sample came from (DPHE / institution / walk-in) and what
+    // paperwork it arrived with. batchRef above is kept only as a legacy
+    // display fallback for pre-migration data.
     matrix: fields.matrix || "Drinking Water",
     collectionDate: fields.collectionDate || todayStr(),
     collectedBy: fields.collectedBy || "",
     receivedDate: fields.receivedDate || todayStr(),
     priority: fields.priority || "Routine",
-    requestedTests: fields.requestedTests || [],
-    // [{testTypeId, testTypeName}]
+    requestedTests: (fields.requestedTests || []).map(rt => ({
+      status: "pending",
+      ...rt
+    })),
+    // [{testTypeId, testTypeName, status}] — status is the real per-parameter
+    // pipeline position (see TEST_STATUSES below), independent of the
+    // whole-sample `status` further down, which is now a ROLLUP of these
+    // (see rollupSampleStatus()).
     numberOfSamples: Number(fields.numberOfSamples) > 0 ? Number(fields.numberOfSamples) : 1,
     // batch size — how many physical field samples this registration covers
     notes: fields.notes || "",
@@ -277,6 +338,34 @@ function transitionSample(sample, newStatus, meta, user) {
     notes: meta?.notes
   }, user);
 }
+// Correct registration-entry mistakes (typos, wrong batch upload row, etc.) —
+// only the registration fields are editable, never status/results/custody
+// history itself; every edit is logged as its own custody event so the
+// correction is auditable rather than silently overwritten.
+const SAMPLE_EDITABLE_FIELDS = ["clientName", "siteLocation", "district", "upazila", "union", "village", "caretakerName", "fatherHusbandName", "latitude", "longitude", "waterPointType", "waterPointTypeOther", "sampleSourceId", "batchRef", "referenceId", "matrix", "collectionDate", "collectedBy", "receivedDate", "priority", "numberOfSamples", "requestedTests", "notes"];
+function editSample(sample, patch, user) {
+  const changes = [];
+  const cleanPatch = {};
+  SAMPLE_EDITABLE_FIELDS.forEach(field => {
+    if (!(field in patch)) return;
+    const oldVal = sample[field];
+    const newVal = patch[field];
+    const oldStr = Array.isArray(oldVal) ? oldVal.map(t => t.testTypeName).join(", ") : String(oldVal ?? "");
+    const newStr = Array.isArray(newVal) ? newVal.map(t => t.testTypeName).join(", ") : String(newVal ?? "");
+    if (oldStr !== newStr) changes.push(`${field}: "${oldStr}" → "${newStr}"`);
+    cleanPatch[field] = newVal;
+  });
+  const next = {
+    ...sample,
+    ...cleanPatch
+  };
+  if (!changes.length) return sample;
+  return addCustodyEvent(next, {
+    action: "Registration Corrected",
+    toUser: user?.name,
+    notes: changes.join("; ")
+  }, user);
+}
 function assignSample(sample, assigneeName, user) {
   const next = {
     ...sample,
@@ -326,7 +415,6 @@ function addApproval(sample, {
       attested: true
     }
   };
-  const nextStatus = decision === "approved" ? step === "review" ? "under_review" : "approved" : "rejected";
   let next = {
     ...sample,
     approvals: [...sample.approvals, approval]
@@ -337,11 +425,99 @@ function addApproval(sample, {
   }, step === "review" ? decision === "approved" ? "under_review" : "rejected" : decision === "approved" ? "approved" : "rejected", {
     notes: `${step === "review" ? "Review" : "Approval"} ${decision} by ${user?.name}${comment ? `: ${comment}` : ""}`
   }, user);
+  // This signature is the real, compliance-gated approval authority for the
+  // whole sample — by the time it fires, the rollup guarantees every
+  // requested parameter already reached at least this sample-level stage
+  // (a lagging parameter would have kept sample.status behind it). Sync
+  // every parameter still sitting at the stage just cleared up to match, so
+  // per-parameter status and this signed decision never disagree.
+  if (decision === "approved") {
+    const fromStatus = step === "review" ? "results_entered" : "under_review";
+    const toStatus = step === "review" ? "under_review" : "approved";
+    next = syncRequestedTestsToStage(next, [fromStatus], toStatus, user, `${step === "review" ? "Reviewed" : "Approved"} (signed by ${user?.name}).`);
+  }
   return next;
+}
+// Bulk, signature-gated final decision on ONE parameter across many
+// samples at once — the same attestation requirement as addApproval()
+// above, just applied to a list instead of one sample. This is what
+// drives Sub-Batch-level and Reference(Batch)-level "Final Approve" —
+// Approve was previously only reachable one sample at a time via Sample
+// Detail's SignatureCapture.
+// Returns { updated: [...changed samples...], skipped: N } — samples not
+// currently at under_review for this parameter are left untouched
+// (skipped), so calling this on a mixed list never wrongly force-advances
+// something that isn't actually ready.
+function bulkDecideParameter(samples, testTypeId, testTypeName, {
+  decision,
+  comment,
+  signedName,
+  attested
+}, user) {
+  if (!attested || !signedName || signedName.trim().length < 2) {
+    throw new Error("Electronic signature requires the approver's typed full name and the attestation checkbox.");
+  }
+  const updated = [];
+  let skipped = 0;
+  samples.forEach(sample => {
+    const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+    if (!rt || rt.status !== "under_review") {
+      skipped++;
+      return;
+    }
+    const approval = {
+      id: uid("apr"),
+      testTypeId,
+      testTypeName,
+      decision,
+      comment: comment || "",
+      byUser: user?.name,
+      byRole: user?.role,
+      ts: new Date().toISOString(),
+      signature: {
+        signedName: signedName.trim(),
+        attested: true
+      }
+    };
+    let next = {
+      ...sample,
+      approvals: [...(sample.approvals || []), approval]
+    };
+    if (decision === "approved") {
+      next = setRequestedTestStatus(next, testTypeId, "approved", user, `Approved (signed by ${user?.name}) for ${testTypeName}.`);
+    } else {
+      next = setRequestedTestStatus(next, testTypeId, "in_progress", user, `Approval rejected (signed by ${user?.name}) for ${testTypeName}${comment ? `: ${comment}` : ""}.`);
+    }
+    updated.push(next);
+  });
+  return {
+    updated,
+    skipped
+  };
+}
+// Bulk release ONE parameter across many samples at once — same pattern as
+// bulkDecideParameter, but for the Approved -> Released step. Not
+// signature-gated (matching the existing single-sample releaseResults()
+// behavior) — just requires the parameter to already be approved.
+function bulkReleaseParameter(samples, testTypeId, testTypeName, user, note) {
+  const updated = [];
+  let skipped = 0;
+  samples.forEach(sample => {
+    const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+    if (!rt || rt.status !== "approved") {
+      skipped++;
+      return;
+    }
+    updated.push(setRequestedTestStatus(sample, testTypeId, "released", user, note || `Released (by ${user?.name}) for ${testTypeName}.`));
+  });
+  return {
+    updated,
+    skipped
+  };
 }
 function releaseResults(sample, user, note) {
   if (sample.status !== "approved") throw new Error("Only approved samples can be released.");
-  const next = {
+  let next = {
     ...sample,
     status: "released",
     resultRelease: {
@@ -351,113 +527,17 @@ function releaseResults(sample, user, note) {
       note: note || ""
     }
   };
-  return addCustodyEvent(next, {
+  next = addCustodyEvent(next, {
     action: "Results Released",
     toUser: sample.clientName || "Client",
     notes: note || "Final report released."
   }, user);
+  // Same reasoning as addApproval above — sync every parameter waiting at
+  // "approved" up to "released" so the per-parameter record matches.
+  return syncRequestedTestsToStage(next, ["approved"], "released", user, `Released (by ${user?.name}).`);
 }
 
-// ============================================================================
-// PER-TEST PROGRESS — DERIVED, not stored. This is the fix for "samples e
-// auto update hobe na" (nothing updates automatically): rather than storing
-// a testStatus field on each requestedTest that some other screen has to
-// remember to keep in sync (exactly the kind of drift that caused the
-// original mess), a sample's per-test progress is computed fresh, every
-// time, from the Batches and Test Records that actually exist. There is
-// nothing to fall out of sync because there is nothing extra being stored.
-// ============================================================================
-
-const TEST_PROGRESS_STAGES = [{
-  key: "pending",
-  label: "Pending",
-  color: "muted"
-}, {
-  key: "batched",
-  label: "Batched",
-  color: "info"
-}, {
-  key: "result_entered",
-  label: "Result Entered",
-  color: "warn"
-}, {
-  key: "under_review",
-  label: "Under Review",
-  color: "warn"
-}, {
-  key: "approved",
-  label: "Approved",
-  color: "ok"
-}, {
-  key: "released",
-  label: "Released",
-  color: "ok"
-}];
-function testProgressMeta(key) {
-  return TEST_PROGRESS_STAGES.find(s => s.key === key) || TEST_PROGRESS_STAGES[0];
-}
-
-// batches here means the Sub-Batch/Batch collection (16-sub-batch.js).
-function getRequestedTestStatus(sample, testTypeId, testRecords, batches) {
-  const result = getSampleResultForTest(sample, testTypeId, testRecords);
-  if (result) {
-    // A result exists — from here the SAMPLE's own approval stage (which is
-    // whole-sample, since one signed report covers all its tests together)
-    // determines how far along this particular test really is.
-    if (sample.status === "released") return "released";
-    if (sample.status === "approved") return "approved";
-    if (sample.status === "under_review") return "under_review";
-    return "result_entered";
-  }
-  const reserved = (batches || []).some(b => (b.members || []).some(m => m.sampleId === sample.id && m.testTypeId === testTypeId) && batchGroupStatus(b, testTypeId, testRecords) === "pending");
-  return reserved ? "batched" : "pending";
-}
-
-// The full picture for one sample — every requested test with its live,
-// derived stage. This is what the Sample Profile view and every summary
-// badge should read from, instead of each screen inventing its own logic.
-function sampleTestProgress(sample, testRecords, batches) {
-  const tests = (sample.requestedTests || []).map(rt => ({
-    ...rt,
-    stage: getRequestedTestStatus(sample, rt.testTypeId, testRecords, batches)
-  }));
-  const total = tests.length;
-  const doneStages = ["result_entered", "under_review", "approved", "released"];
-  const done = tests.filter(t => doneStages.includes(t.stage)).length;
-  return {
-    tests,
-    total,
-    done,
-    allResultsIn: total > 0 && done === total
-  };
-}
-
-// Call this after ANY action that might complete a sample's last pending
-// test (saving a Test Record, committing a Bulk Result Upload, running a
-// Batch). If every requested test now has a result and the sample hasn't
-// already moved past that point, this bumps the sample straight to
-// "results_entered" — automatically, with a custody log entry — so nobody
-// has to remember to click "Move Status" by hand. Returns the sample
-// unchanged if nothing needs to happen (safe to call unconditionally).
-function autoAdvanceSampleStatus(sample, testRecords, batches, user) {
-  const stillEarly = ["registered", "received", "assigned", "in_progress"].includes(sample.status);
-  if (!stillEarly) return sample;
-  const progress = sampleTestProgress(sample, testRecords, batches);
-  if (!progress.allResultsIn) return sample;
-  let next = sample.status === "registered" ? addCustodyEvent(sample, {
-    action: "Auto: Received in Lab",
-    toUser: user?.name,
-    notes: "All requested tests now have results."
-  }, user) : sample;
-  next = { ...next, status: "results_entered" };
-  return addCustodyEvent(next, {
-    action: "Auto: All Results Entered",
-    toUser: user?.name,
-    notes: "Every requested test on this sample now has a result — ready for review."
-  }, user);
-}
-
-
+// ---- dashboard-facing stats ----
 function sampleLifecycleStats(samples) {
   const byStatus = {};
   SAMPLE_STATUSES.forEach(s => byStatus[s.key] = 0);

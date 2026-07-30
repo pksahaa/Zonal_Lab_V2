@@ -33,7 +33,8 @@ const DataService = (() => {
         gasUrl: "",
         token: ""
       };
-    } catch {
+    } catch (e) {
+      reportStorageError("load", "backend config", e);
       return {
         mode: "local",
         gasUrl: "",
@@ -64,7 +65,8 @@ const DataService = (() => {
     try {
       const raw = localStorage.getItem(localKey(collection));
       return raw ? JSON.parse(raw) : [];
-    } catch {
+    } catch (e) {
+      reportStorageError("load", collection, e);
       return [];
     }
   }

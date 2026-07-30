@@ -41,7 +41,7 @@ function buildReportHtml({
     }).join("");
     return `<tr>
       <td>${s.sampleCode}</td>
-      <td>${s.caretakerName || "-"}</td>
+      <td>${s.clientName || "-"}</td>
       <td>${s.village || "-"}</td>
       <td>${s.union || "-"}</td>
       <td>${s.upazila || "-"}</td>
@@ -175,14 +175,17 @@ function SignatorySlot({
 }
 function CustomReportGeneratorPage({
   samples,
+  setSamples,
+  references,
   subBatches,
   testTypes,
   testRecords,
   users,
-  notify
+  session,
+  goToSample,
+  notify,
+  forceMode
 }) {
-  const [selectionMode, setSelectionMode] = React.useState("individual"); // "individual" | "subBatch"
-  const [pickedBatchId, setPickedBatchId] = React.useState("");
   const [q, setQ] = React.useState("");
   const [selectedSampleIds, setSelectedSampleIds] = React.useState([]);
   const [selectedTestIds, setSelectedTestIds] = React.useState([]);
@@ -209,8 +212,17 @@ function CustomReportGeneratorPage({
       designation: ""
     }]
   });
+  const [selectionMode, setSelectionMode] = React.useState(forceMode || "individual"); // "individual" | "batch" | "subbatch"
+  const [reportReferenceId, setReportReferenceId] = React.useState("");
+  const [reportSubBatchId, setReportSubBatchId] = React.useState("");
   const filteredSamples = (samples || []).filter(s => !q || `${s.sampleCode} ${s.clientName} ${s.siteLocation} ${s.village}`.toLowerCase().includes(q.toLowerCase()));
-  const distinctBatchRefs = Array.from(new Set((samples || []).map(s => s.batchRef).filter(Boolean))).sort();
+  // Reporting is done by Reference (the actual source paperwork — DPHE /
+  // institution / walk-in letter+ref no.), not by whichever Sub-Batch
+  // happened to test the samples. Only list References that have at least
+  // one sample pointing at them.
+  const referenceOptions = Array.from(new Set((samples || []).map(s => s.referenceId).filter(Boolean))).map(id => findReferenceById(references, id)).filter(Boolean).sort((a, b) => (a.refNo || "").localeCompare(b.refNo || ""));
+  const reportSubBatchOptions = [...(subBatches || [])].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const selectedReportSubBatch = reportSubBatchId ? (subBatches || []).find(sb => sb.id === reportSubBatchId) : null;
   const selectedSamples = (samples || []).filter(s => selectedSampleIds.includes(s.id));
   const availableTestIds = React.useMemo(() => {
     const ids = new Set();
@@ -218,18 +230,19 @@ function CustomReportGeneratorPage({
     return Array.from(ids);
   }, [selectedSampleIds]);
   React.useEffect(() => {
+    // In Sub-Batch mode the test column is implied by the picked Sub-Batch
+    // (set explicitly when it's chosen) — don't let this effect widen it
+    // back out to every test type the member samples have ever requested.
+    if (selectionMode === "subbatch") return;
     setSelectedTestIds(availableTestIds);
     // eslint-disable-next-line
-  }, [availableTestIds.join(",")]);
+  }, [availableTestIds.join(","), selectionMode]);
   const selectedTests = testTypes.filter(t => selectedTestIds.includes(t.id));
-  function pickBatch(batchId) {
-    setPickedBatchId(batchId);
-    const batch = (subBatches || []).find(b => b.id === batchId);
-    if (!batch) { setSelectedSampleIds([]); return; }
-    const ids = Array.from(new Set((batch.members || []).map(m => m.sampleId)));
-    setSelectedSampleIds(ids);
-  }
   function toggleSample(id) {
+    if (forceMode === "individual") {
+      setSelectedSampleIds(prev => prev.includes(id) ? [] : [id]);
+      return;
+    }
     setSelectedSampleIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
   function toggleTest(id) {
@@ -260,6 +273,23 @@ function CustomReportGeneratorPage({
       notify?.("Select at least one test to include as a column.", "warn");
       return;
     }
+    // Hard gate — a report can't be produced for a column that has no
+    // result yet at all (as opposed to the softer "not approved yet"
+    // check further down, which still lets the report print).
+    const missingResults = [];
+    selectedSamples.forEach(sample => {
+      selectedTests.forEach(t => {
+        const rt = (sample.requestedTests || []).find(r => r.testTypeId === t.id);
+        if (!rt) return; // this sample never requested this column — not this gate's concern
+        if (rt.status === "pending" || rt.status === "in_progress") {
+          missingResults.push(`${sample.sampleCode} — ${t.name}`);
+        }
+      });
+    });
+    if (missingResults.length) {
+      notify?.(`Can't generate — ${missingResults.length} selected parameter(s) don't have a result entered yet: ${missingResults.slice(0, 6).join(", ")}${missingResults.length > 6 ? "…" : ""}. Remove them from the selection, or enter their results first.`, "warn");
+      return;
+    }
     const html = buildReportHtml({
       labIdentity: getLabIdentity(),
       memo,
@@ -269,75 +299,56 @@ function CustomReportGeneratorPage({
       signatories
     });
     printOfficialReport(html);
+    // Per the workflow doc, a report should only be generated after
+    // approval — this is a soft check (warn, don't block) since not every
+    // lab necessarily runs every parameter through the formal review step.
+    if (setSamples) {
+      const notYetApproved = [];
+      selectedSamples.forEach(sample => {
+        let updated = sample;
+        selectedTests.forEach(t => {
+          const rt = (sample.requestedTests || []).find(r => r.testTypeId === t.id);
+          if (!rt) return; // this sample didn't request this column
+          if (rt.status === "approved") {
+            updated = setRequestedTestStatus(updated, t.id, "released", session);
+          } else if (rt.status !== "released") {
+            notYetApproved.push(`${sample.sampleCode} — ${t.name}`);
+          }
+        });
+        if (updated !== sample) {
+          setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
+        }
+      });
+      if (notYetApproved.length) {
+        notify?.(`Report generated — but ${notYetApproved.length} parameter(s) hadn't been through final approval yet, so they weren't marked Released: ${notYetApproved.slice(0, 5).join(", ")}${notYetApproved.length > 5 ? "…" : ""}.`, "warn");
+      }
+    }
   }
-  return /*#__PURE__*/React.createElement("div", {
-    className: "grid gap-4"
-  }, /*#__PURE__*/React.createElement(SectionCard, {
-    title: "Step 1 — Select Samples",
-    icon: /*#__PURE__*/React.createElement(Icon, {
-      name: "clipboard",
-      size: 15
-    })
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "mb-3",
-    style: { maxWidth: 320 }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "flex flex-col gap-1 text-xs",
+  // ---- Step 1 selection, built as plain variables (Individual / Batch-by-
+  // Reference / Sub-Batch) instead of one giant nested expression. ----
+  const modeSelectorRow = forceMode ? null : /*#__PURE__*/React.createElement("label", {
+    className: "flex flex-col gap-1 text-xs mb-2",
     style: { color: C.muted }
   }, "How are you selecting samples?", /*#__PURE__*/React.createElement("select", {
     className: "border rounded px-2 py-1.5 text-sm",
     style: { borderColor: C.border },
     value: selectionMode,
     onChange: e => {
-      setSelectionMode(e.target.value);
+      const mode = e.target.value;
+      setSelectionMode(mode);
+      setReportReferenceId("");
+      setReportSubBatchId("");
       setSelectedSampleIds([]);
-      setPickedBatchId("");
     }
-  }, /*#__PURE__*/React.createElement("option", { value: "individual" }, "Individual Samples"), /*#__PURE__*/React.createElement("option", { value: "subBatch" }, "Sub-Batch")))), selectionMode === "subBatch" && /*#__PURE__*/React.createElement("label", {
-    className: "flex flex-col gap-1 text-xs mb-3",
-    style: { color: C.muted }
-  }, "Select Sub-Batch", /*#__PURE__*/React.createElement("select", {
-    className: "border rounded px-2 py-1.5 text-sm w-full",
-    style: { borderColor: C.border },
-    value: pickedBatchId,
-    onChange: e => pickBatch(e.target.value)
-  }, /*#__PURE__*/React.createElement("option", { value: "" }, "— select a batch —"), (subBatches || []).map(sb => /*#__PURE__*/React.createElement("option", {
-    key: sb.id,
-    value: sb.id
-  }, sb.label, " (", (sb.members || []).length, " pair(s))")))), selectionMode === "subBatch" && pickedBatchId && /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mb-3 p-2 rounded",
-    style: { background: C.infoBg, color: C.info }
-  }, selectedSampleIds.length, " sample(s) pulled in from this batch. You can still fine-tune below."), selectionMode === "individual" && /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("option", { value: "individual" }, "Individual Samples"), /*#__PURE__*/React.createElement("option", { value: "batch" }, "Batch (by Reference)"), /*#__PURE__*/React.createElement("option", { value: "subbatch" }, "Analytical Batch")));
+
+  const individualModeBlock = selectionMode !== "individual" ? null : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
     className: "border rounded px-2 py-1.5 text-xs w-full mb-2",
-    style: {
-      borderColor: C.border
-    },
+    style: { borderColor: C.border },
     placeholder: "Search by sample code, client, site, village…",
     value: q,
     onChange: e => setQ(e.target.value)
-  }), selectionMode === "individual" && distinctBatchRefs.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2 mb-2"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-xs",
-    style: {
-      color: C.muted
-    }
-  }, "Quick-select by original receiving batch:"), /*#__PURE__*/React.createElement("select", {
-    className: "border rounded px-2 py-1 text-xs",
-    style: {
-      borderColor: C.border
-    },
-    value: "",
-    onChange: e => {
-      if (!e.target.value) return;
-      setSelectedSampleIds((samples || []).filter(s => s.batchRef === e.target.value).map(s => s.id));
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "Select a batch ref…"), distinctBatchRefs.map(ref => /*#__PURE__*/React.createElement("option", {
-    key: ref,
-    value: ref
-  }, ref, " (", (samples || []).filter(s => s.batchRef === ref).length, " samples)")))), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 mb-2"
   }, /*#__PURE__*/React.createElement(Button, {
     variant: "ghost",
@@ -348,37 +359,129 @@ function CustomReportGeneratorPage({
     size: "sm",
     onClick: () => setSelectedSampleIds([])
   }, "Clear")), /*#__PURE__*/React.createElement("div", {
-    className: "grid gap-1 max-h-56 overflow-y-auto p-1 rounded",
-    style: {
-      border: `1px solid ${C.border}`
-    }
+    className: "max-h-56 overflow-y-auto rounded",
+    style: { border: `1px solid ${C.border}` }
   }, filteredSamples.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2",
-    style: {
-      color: C.muted
+    style: { color: C.muted }
+  }, "No samples match.") : /*#__PURE__*/React.createElement("table", {
+    className: "w-full text-xs border-collapse"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, ["", "Sample", "Client", "Site / Village", "Reference", ""].map((h, i) => /*#__PURE__*/React.createElement("th", {
+    key: i,
+    className: "text-left px-2 py-1.5 sticky top-0",
+    style: { background: C.card, borderBottom: `1px solid ${C.border}`, color: C.muted }
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, filteredSamples.map(s => {
+    const ref = s.referenceId ? findReferenceById(references, s.referenceId) : null;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: s.id,
+      className: "cursor-pointer",
+      style: { background: selectedSampleIds.includes(s.id) ? `${C.teal}14` : "transparent" },
+      onClick: () => toggleSample(s.id)
+    }, /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: selectedSampleIds.includes(s.id),
+      onChange: () => toggleSample(s.id),
+      onClick: e => e.stopPropagation()
+    })), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 font-semibold"
+    }, s.sampleCode), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: { color: C.muted }
+    }, s.clientName), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: { color: C.muted }
+    }, `${s.siteLocation}${s.village ? ` · ${s.village}` : ""}`), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: { color: C.muted }
+    }, ref ? referenceDisplayLabel(ref) : "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5"
+    }, goToSample && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      title: "View full sample record",
+      style: { color: C.info },
+      onClick: e => {
+        e.preventDefault();
+        e.stopPropagation();
+        goToSample(s.id);
+      }
+    }, "↗")));
+  })))));
+
+  const batchModeBlock = selectionMode !== "batch" ? null : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
+    className: "border rounded px-2 py-1.5 text-sm w-full mb-2",
+    style: { borderColor: C.border },
+    value: reportReferenceId,
+    onChange: e => {
+      const refId = e.target.value;
+      setReportReferenceId(refId);
+      const ref = findReferenceById(references, refId);
+      if (!ref) {
+        setSelectedSampleIds([]);
+        return;
+      }
+      setSelectedSampleIds((samples || []).filter(s => s.referenceId === ref.id).map(s => s.id));
+      setMemo(prev => ({
+        ...prev,
+        refMemoNo: ref.isAutoGenerated ? prev.refMemoNo : ref.refNo,
+        refMemoDate: ref.letterDate || prev.refMemoDate,
+        sampleSource: ref.organizationName || prev.sampleSource
+      }));
     }
-  }, "No samples match.") : filteredSamples.map(s => /*#__PURE__*/React.createElement("label", {
+  }, [/*#__PURE__*/React.createElement("option", { key: "none", value: "" }, "— Select a Reference —")].concat(referenceOptions.map(ref => /*#__PURE__*/React.createElement("option", {
+    key: ref.id,
+    value: ref.id
+  }, `${referenceSourceMeta(ref.sourceType).label} — ${referenceDisplayLabel(ref)} (${(samples || []).filter(s => s.referenceId === ref.id).length} samples)`)))), selectedSampleIds.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1.5 mb-2"
+  }, selectedSamples.map(s => /*#__PURE__*/React.createElement("span", {
     key: s.id,
-    className: "flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer",
-    style: {
-      background: selectedSampleIds.includes(s.id) ? `${C.teal}14` : "transparent"
+    className: "text-[11px] px-2 py-0.5 rounded-full",
+    style: { background: C.bg, color: C.ink }
+  }, `${s.sampleCode} · ${s.clientName}`))));
+
+  const subBatchModeBlock = selectionMode !== "subbatch" ? null : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
+    className: "border rounded px-2 py-1.5 text-sm w-full mb-2",
+    style: { borderColor: C.border },
+    value: reportSubBatchId,
+    onChange: e => {
+      const sbId = e.target.value;
+      setReportSubBatchId(sbId);
+      const sb = (subBatches || []).find(x => x.id === sbId);
+      if (!sb) {
+        setSelectedSampleIds([]);
+        return;
+      }
+      setSelectedSampleIds(sb.memberSampleIds || []);
+      setSelectedTestIds([sb.testTypeId]);
     }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: selectedSampleIds.includes(s.id),
-    onChange: () => toggleSample(s.id)
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "font-semibold"
-  }, s.sampleCode), /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: C.muted
-    }
-  }, s.clientName, " · ", s.siteLocation, s.village ? ` · ${s.village}` : "")))), /*#__PURE__*/React.createElement("div", {
+  }, [/*#__PURE__*/React.createElement("option", { key: "none", value: "" }, "— Select an Analytical Batch —")].concat(reportSubBatchOptions.map(sb => /*#__PURE__*/React.createElement("option", {
+    key: sb.id,
+    value: sb.id
+  }, `${sb.label} — ${sb.testTypeName} (${(sb.memberSampleIds || []).length} samples) · ${sb.status}`)))), selectedReportSubBatch && /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1.5 mb-2"
+  }, selectedSamples.map(s => /*#__PURE__*/React.createElement("span", {
+    key: s.id,
+    className: "text-[11px] px-2 py-0.5 rounded-full",
+    style: { background: C.bg, color: C.ink }
+  }, `${s.sampleCode} · ${s.clientName}`))));
+
+  const sampleSelectionSummaryLine = /*#__PURE__*/React.createElement("div", {
     className: "text-xs mt-2 font-semibold",
-    style: {
-      color: C.teal
-    }
-  }, selectedSampleIds.length, " sample(s) selected")), selectedSampleIds.length > 0 && /*#__PURE__*/React.createElement(SectionCard, {
+    style: { color: C.teal }
+  }, `${selectedSampleIds.length} sample(s) selected`);
+
+  const sampleSelectionSection = /*#__PURE__*/React.createElement(React.Fragment, null, modeSelectorRow, individualModeBlock, batchModeBlock, subBatchModeBlock, sampleSelectionSummaryLine);
+
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grid gap-4"
+  }, /*#__PURE__*/React.createElement(SectionCard, {
+    title: "Step 1 — Select Samples",
+    icon: /*#__PURE__*/React.createElement(Icon, {
+      name: "clipboard",
+      size: 15
+    })
+  }, sampleSelectionSection), selectedSampleIds.length > 0 && /*#__PURE__*/React.createElement(SectionCard, {
     title: "Step 2 — Select Tests (Report Columns)",
     icon: /*#__PURE__*/React.createElement(Icon, {
       name: "flask",
@@ -479,232 +582,4 @@ function CustomReportGeneratorPage({
     name: "printer",
     size: 14
   }), "Generate & Print Report (", selectedSampleIds.length, " sample", selectedSampleIds.length === 1 ? "" : "s", ")")));
-}
-
-function SingleSampleReportPage({
-  samples,
-  testTypes,
-  testRecords,
-  notify
-}) {
-  const [sampleId, setSampleId] = React.useState("");
-  const [selectedTestIds, setSelectedTestIds] = React.useState([]);
-  const [memo, setMemo] = React.useState({
-    memoNo: "",
-    date: todayStr(),
-    sentBy: "",
-    district: "",
-    sampleSource: "",
-    refMemoNo: "",
-    refMemoDate: "",
-    dateOfTesting: todayStr(),
-    receivingDate: "",
-    collectionDate: "",
-    notes: ""
-  });
-  const [signatories, setSignatories] = React.useState({
-    performedBy: [{
-      name: "",
-      designation: ""
-    }],
-    approvedBy: [{
-      name: "",
-      designation: ""
-    }]
-  });
-  const sample = (samples || []).find(s => s.id === sampleId) || null;
-  React.useEffect(() => {
-    if (sample) setSelectedTestIds(sample.requestedTests.map(rt => rt.testTypeId));
-    // eslint-disable-next-line
-  }, [sampleId]);
-  function toggleTest(id) {
-    setSelectedTestIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  }
-  function generate() {
-    if (!sample) {
-      notify?.("Select a sample first.", "warn");
-      return;
-    }
-    const selectedTests = testTypes.filter(t => selectedTestIds.includes(t.id));
-    if (!selectedTests.length) {
-      notify?.("Select at least one test to include.", "warn");
-      return;
-    }
-    const html = buildReportHtml({
-      labIdentity: getLabIdentity(),
-      memo,
-      selectedSamples: [sample],
-      selectedTests,
-      testRecords,
-      signatories
-    });
-    printOfficialReport(html);
-  }
-  return /*#__PURE__*/React.createElement("div", {
-    className: "grid gap-4"
-  }, /*#__PURE__*/React.createElement(SectionCard, {
-    title: "Step 1 — Select a Sample",
-    icon: /*#__PURE__*/React.createElement(Icon, {
-      name: "clipboard",
-      size: 15
-    })
-  }, /*#__PURE__*/React.createElement(SelectField, {
-    simple: true,
-    label: "Sample",
-    value: sampleId,
-    onChange: setSampleId,
-    options: (samples || []).map(s => ({
-      value: s.id,
-      label: `${s.sampleCode} — ${s.clientName}`
-    })),
-    placeholder: "— select a sample —"
-  }), sample && /*#__PURE__*/React.createElement("div", {
-    className: "mt-3"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-medium mb-1.5",
-    style: {
-      color: C.muted
-    }
-  }, "Include These Tests"), /*#__PURE__*/React.createElement("div", {
-    className: "flex flex-wrap gap-1.5"
-  }, sample.requestedTests.map(rt => {
-    const on = selectedTestIds.includes(rt.testTypeId);
-    return /*#__PURE__*/React.createElement("button", {
-      key: rt.testTypeId,
-      onClick: () => toggleTest(rt.testTypeId),
-      className: "px-2.5 py-1 rounded-full text-xs font-medium border",
-      style: {
-        background: on ? C.teal : "transparent",
-        color: on ? "#fff" : C.ink,
-        borderColor: on ? C.teal : C.border
-      }
-    }, rt.testTypeName);
-  })))), /*#__PURE__*/React.createElement(SectionCard, {
-    title: "Step 2 — Memo & Signatories",
-    icon: /*#__PURE__*/React.createElement(Icon, {
-      name: "printer",
-      size: 15
-    })
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-3 gap-3"
-  }, /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Memo No.",
-    value: memo.memoNo,
-    onChange: v => setMemo({
-      ...memo,
-      memoNo: v
-    })
-  }), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Date",
-    type: "date",
-    value: memo.date,
-    onChange: v => setMemo({
-      ...memo,
-      date: v
-    })
-  }), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Sent By",
-    value: memo.sentBy,
-    onChange: v => setMemo({
-      ...memo,
-      sentBy: v
-    })
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-3 mt-3"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-medium mb-1",
-    style: {
-      color: C.muted
-    }
-  }, "Performed By"), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Name",
-    value: signatories.performedBy[0].name,
-    onChange: v => setSignatories({
-      ...signatories,
-      performedBy: [{
-        ...signatories.performedBy[0],
-        name: v
-      }]
-    })
-  }), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Designation",
-    value: signatories.performedBy[0].designation,
-    onChange: v => setSignatories({
-      ...signatories,
-      performedBy: [{
-        ...signatories.performedBy[0],
-        designation: v
-      }]
-    })
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-medium mb-1",
-    style: {
-      color: C.muted
-    }
-  }, "Approved By"), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Name",
-    value: signatories.approvedBy[0].name,
-    onChange: v => setSignatories({
-      ...signatories,
-      approvedBy: [{
-        ...signatories.approvedBy[0],
-        name: v
-      }]
-    })
-  }), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Designation",
-    value: signatories.approvedBy[0].designation,
-    onChange: v => setSignatories({
-      ...signatories,
-      approvedBy: [{
-        ...signatories.approvedBy[0],
-        designation: v
-      }]
-    })
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "flex justify-end mt-3"
-  }, /*#__PURE__*/React.createElement(Button, {
-    onClick: generate
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "printer",
-    size: 14
-  }), "Generate Report"))));
-}
-function CustomReportSection(props) {
-  const [sub, setSub] = React.useState("multi");
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 mb-4 no-print"
-  }, [{
-    k: "multi",
-    label: "Multi Sample Report"
-  }, {
-    k: "single",
-    label: "Single Sample Report"
-  }, {
-    k: "others",
-    label: "Others"
-  }].map(t => /*#__PURE__*/React.createElement("button", {
-    key: t.k,
-    onClick: () => setSub(t.k),
-    className: "px-3 py-1.5 rounded text-sm font-medium",
-    style: {
-      background: sub === t.k ? C.teal : "#fff",
-      color: sub === t.k ? "#fff" : C.muted,
-      border: `1px solid ${sub === t.k ? C.teal : C.border}`
-    }
-  }, t.label))), sub === "multi" && /*#__PURE__*/React.createElement(CustomReportGeneratorPage, props), sub === "single" && /*#__PURE__*/React.createElement(SingleSampleReportPage, props), sub === "others" && /*#__PURE__*/React.createElement("div", {
-    className: "text-sm p-6 text-center rounded",
-    style: {
-      color: C.muted,
-      background: C.card,
-      border: `1px solid ${C.border}`
-    }
-  }, "More report types coming soon."));
 }

@@ -27,7 +27,16 @@ const LIGHT_PALETTE = {
   border: "#D6ECEA",
   muted: "#5B7275",
   info: "#1D5B7A",
-  infoBg: "#E7F1F7"
+  infoBg: "#E7F1F7",
+  // ---- Added during UI/UX audit: these hex values were previously
+  // hardcoded ad-hoc throughout the app (outside this palette), so they
+  // never re-themed in dark mode. Now named tokens like everything else.
+  danger: "#E63946",
+  dangerBg: "#FBE4E6",
+  headerText: "#DDF2F0",
+  headerTextMuted: "#BFE3E0",
+  mutedBg: "#EEF4F3",
+  subtle: "#FAFEFE"
 };
 const DARK_PALETTE = {
   ink: "#EAF6F5",
@@ -44,7 +53,15 @@ const DARK_PALETTE = {
   border: "#25494B",
   muted: "#9BC4C2",
   info: "#7FC4E8",
-  infoBg: "#123244"
+  infoBg: "#123244",
+  danger: "#FF6B75",
+  dangerBg: "#3A1518",
+  // header bar background (C.tealDark) stays a dark teal in both themes, so
+  // the light text sitting on it stays the same in both themes too.
+  headerText: "#DDF2F0",
+  headerTextMuted: "#BFE3E0",
+  mutedBg: "#1C3D3F",
+  subtle: "#173537"
 };
 // C is a mutable palette object — components read C.xxx at render time, so
 // re-assigning its keys (via applyTheme) and forcing a re-render is enough
@@ -379,6 +396,40 @@ function Icon({
       }), /*#__PURE__*/React.createElement("path", {
         d: "M3 9h18M3 15h18M9 4v16"
       }));
+    case "moreVertical":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("circle", {
+        cx: "12",
+        cy: "5",
+        r: "1.5",
+        fill: color,
+        stroke: "none"
+      }), /*#__PURE__*/React.createElement("circle", {
+        cx: "12",
+        cy: "12",
+        r: "1.5",
+        fill: color,
+        stroke: "none"
+      }), /*#__PURE__*/React.createElement("circle", {
+        cx: "12",
+        cy: "19",
+        r: "1.5",
+        fill: color,
+        stroke: "none"
+      }));
+    case "list":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M8 6h13M8 12h13M8 18h13"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M3 6h.01M3 12h.01M3 18h.01"
+      }));
+    case "layers":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M12 2 2 7l10 5 10-5-10-5z"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M2 17l10 5 10-5"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M2 12l10 5 10-5"
+      }));
     case "maximize":
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
         d: "M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"
@@ -389,6 +440,112 @@ function Icon({
       }));
     default:
       return null;
+  }
+}
+
+// ---------------- Sample Register field definitions (single source of truth) ----------------
+// Shared by the Excel manifest template generator (downloadTemplate("samples") in
+// 10-inventory-logic.js) and the Bulk Upload parser (importSamples/confirmImportSamples
+// in 21-sample-ui.js), and mirrors the per-row fields collected in Register Sample's
+// "Sample Part" (BatchRegistrationForm rows, 21-sample-ui.js). Add/rename a field here
+// once and both the template and the parser stay in sync automatically.
+// `header` is the exact Excel column header written to the template AND read back on
+// import (with `aliases` accepted too, for backward compatibility with older sheets).
+const SAMPLE_IMPORT_COLUMNS = [{
+  key: "customerName",
+  header: "Customer Name",
+  aliases: ["CustomerName", "ClientName", "Client Name"],
+  required: true
+}, {
+  key: "fatherHusbandName",
+  header: "Father's/Husband's Name",
+  aliases: ["FatherHusbandName"]
+}, {
+  key: "district",
+  header: "District",
+  aliases: []
+}, {
+  key: "upazila",
+  header: "City Corp/Pouroshova/Upazilla",
+  aliases: ["Upazila", "Upazila/City Corporation"]
+}, {
+  key: "union",
+  header: "Ward/Union",
+  aliases: ["Union", "Union/Pourashava"]
+}, {
+  key: "siteName",
+  header: "Site Name",
+  aliases: ["SiteName", "SiteLocation", "Site Location"],
+  required: true
+}, {
+  key: "latitude",
+  header: "Latitude",
+  aliases: []
+}, {
+  key: "longitude",
+  header: "Longitude",
+  aliases: []
+}, {
+  key: "waterPointType",
+  header: "Type of Water Point",
+  aliases: ["WaterPointType"]
+}, {
+  key: "waterPointTypeOther",
+  header: "Type of Water Point - Other",
+  aliases: ["WaterPointTypeOther"]
+}, {
+  key: "matrix",
+  header: "Matrix",
+  aliases: []
+}, {
+  key: "collectionDate",
+  header: "CollectionDate",
+  aliases: ["Collection Date"]
+}, {
+  key: "collectedBy",
+  header: "CollectedBy",
+  aliases: ["Collected By"]
+}, {
+  key: "receivedDate",
+  header: "ReceivedDate",
+  aliases: ["Received Date"]
+}, {
+  key: "priority",
+  header: "Priority",
+  aliases: []
+}, {
+  key: "notes",
+  header: "Notes",
+  aliases: []
+}];
+// Looks up a field's value from a parsed Excel row, trying the canonical header first,
+// then every accepted alias — so old manifests and the current template both work.
+function readSampleImportField(row, colKey) {
+  const col = SAMPLE_IMPORT_COLUMNS.find(c => c.key === colKey);
+  if (!col) return "";
+  if (row[col.header] !== undefined && row[col.header] !== "") return row[col.header];
+  for (const alias of col.aliases) {
+    if (row[alias] !== undefined && row[alias] !== "") return row[alias];
+  }
+  return "";
+}
+
+// ---------------- Storage error reporting ----------------
+// A failed localStorage save/load used to fail completely silently in both
+// 01-data-service.js and 06-legacy-storage.js (catch block just returned a
+// fallback, or did nothing) — the person editing data had no way to know
+// their change didn't actually persist. This is a tiny registry so any part
+// of the app that has a `notify()` toast can plug it in once (see 99-app.js
+// LabApp); if nothing has registered yet (very early during boot) it just
+// logs to the console instead of throwing.
+let _storageErrorNotify = null;
+function registerStorageErrorHandler(fn) {
+  _storageErrorNotify = fn;
+}
+function reportStorageError(action, key, e) {
+  console.error(`Storage ${action} failed for "${key}":`, e);
+  if (_storageErrorNotify) {
+    _storageErrorNotify(`Couldn't ${action} "${key}" — ${action === "load" ? "using defaults for now" : "your last change may not survive a page refresh"}. (${e.message || e})`, "warn");
   }
 }
 

@@ -169,7 +169,7 @@ function RequirementEditor({
     volumetric: {
       label: "Volumetric %",
       tone: C.tealDark,
-      toneBg: "#EAF6F5"
+      toneBg: `${C.tealDark}1A`
     }
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -208,7 +208,7 @@ function RequirementEditor({
     className: "rounded-lg p-3.5",
     style: {
       border: `1px solid ${C.border}`,
-      background: "#FAFEFE"
+      background: C.subtle
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid gap-3 mb-2.5",
@@ -233,7 +233,7 @@ function RequirementEditor({
       className: "border rounded px-3 py-1.5 text-sm text-center",
       style: {
         borderColor: C.border,
-        background: "#F3FAF9",
+        background: C.bg,
         color: C.ink
       }
     }, c.unit)) : /*#__PURE__*/React.createElement("div", null);
@@ -271,8 +271,8 @@ function RequirementEditor({
     }),
     className: "px-2.5 py-1",
     style: {
-      background: !req.optional ? C.teal : "#FFFFFF",
-      color: !req.optional ? "#FFFFFF" : C.muted,
+      background: !req.optional ? C.teal : C.card,
+      color: !req.optional ? "#fff" : C.muted,
       fontWeight: !req.optional ? 600 : 400
     }
   }, "Required"), /*#__PURE__*/React.createElement("button", {
@@ -282,8 +282,8 @@ function RequirementEditor({
     }),
     className: "px-2.5 py-1",
     style: {
-      background: req.optional ? C.warn : "#FFFFFF",
-      color: req.optional ? "#FFFFFF" : C.muted,
+      background: req.optional ? C.warn : C.card,
+      color: req.optional ? "#fff" : C.muted,
       fontWeight: req.optional ? 600 : 400
     }
   }, "Not Required")), /*#__PURE__*/React.createElement("span", {
@@ -304,7 +304,7 @@ function RequirementEditor({
       className: "rounded p-2.5",
       style: {
         border: `1px solid ${C.border}`,
-        background: "#FFFFFF"
+        background: C.card
       }
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-2 mb-2"
@@ -397,7 +397,7 @@ function RequirementEditor({
     }, "Multiplier Reference", /*#__PURE__*/React.createElement("span", {
       className: "text-xs px-2 py-1.5 rounded",
       style: {
-        background: "#EEF4F3",
+        background: C.mutedBg,
         color: C.muted
       }
     }, "No. of Diluted Samples"))), /*#__PURE__*/React.createElement("label", {
@@ -474,7 +474,7 @@ function RequirementEditor({
     }, "Multiplier Reference", /*#__PURE__*/React.createElement("span", {
       className: "text-xs px-2 py-1.5 rounded",
       style: {
-        background: "#EEF4F3",
+        background: C.mutedBg,
         color: C.muted
       }
     }, "No. of Diluted Samples")), /*#__PURE__*/React.createElement("label", {
@@ -579,7 +579,7 @@ function GasRequirementPicker({
       key: g.id,
       className: "flex items-center gap-1.5 text-xs px-2 py-1 rounded",
       style: {
-        background: checked ? C.okBg : "#F7FBFB",
+        background: checked ? C.okBg : C.subtle,
         color: checked ? C.ok : C.muted
       }
     }, /*#__PURE__*/React.createElement("input", {
@@ -607,7 +607,7 @@ function CollapsibleSection({
     onClick: () => setOpen(o => !o),
     className: "w-full flex items-center gap-2.5 px-3 py-2.5 text-left",
     style: {
-      background: "#FAFEFE"
+      background: C.subtle
     }
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center justify-center rounded-full text-xs font-bold shrink-0",
@@ -712,12 +712,12 @@ function ResultParameterEditor({
     className: "rounded p-3",
     style: {
       border: `1px solid ${C.border}`,
-      background: "#FAFEFE"
+      background: C.subtle
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-2 mb-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-3 gap-2 flex-1"
+    className: "grid grid-cols-1 md:grid-cols-3 gap-2 flex-1"
   }, /*#__PURE__*/React.createElement(TextField, {
     label: "Result Name",
     value: p.name,
@@ -931,12 +931,12 @@ function QcRuleEditor({
     className: "rounded p-3",
     style: {
       border: `1px solid ${C.border}`,
-      background: "#FAFEFE"
+      background: C.subtle
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between gap-2 mb-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-2 flex-1"
+    className: "grid grid-cols-1 md:grid-cols-2 gap-2 flex-1"
   }, /*#__PURE__*/React.createElement(SelectField, {
     label: "QC Type",
     value: r.qcType,
@@ -962,7 +962,7 @@ function QcRuleEditor({
     name: "trash",
     size: 14
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-4 gap-2"
+    className: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2"
   }, /*#__PURE__*/React.createElement(SelectField, {
     label: "Comparator",
     value: r.comparator,
@@ -992,7 +992,7 @@ function QcRuleEditor({
     }),
     placeholder: "e.g. %, mg/L"
   })), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-2 mt-2"
+    className: "grid grid-cols-1 md:grid-cols-2 gap-2 mt-2"
   }, /*#__PURE__*/React.createElement(TextField, {
     label: "Target Mean (optional, for QC control chart)",
     type: "number",
@@ -1058,6 +1058,9 @@ function TestTypeBuilder({
   const [testName, setTestName] = useState(initial?.testName || "");
   const [method, setMethod] = useState(initial?.method || "");
   const [costPerTest, setCostPerTest] = useState(initial ? String(initial.costPerTest ?? 0) : "");
+  // Submit-guard: onSave() is synchronous, but a fast double-click can still
+  // fire it twice before React disables the button — this ref stops it cold.
+  const savingRef = React.useRef(false);
   const [defaultEquipmentId, setDefaultEquipmentId] = useState(initial?.defaultEquipmentId || "");
   const [chemicalRequirements, setChemicalRequirements] = useState(initial?.chemicalRequirements || []);
   const [gasRequirements, setGasRequirements] = useState(initial?.gasRequirements || []);
@@ -1091,9 +1094,11 @@ function TestTypeBuilder({
   }
   const hasErrors = Object.keys(errors).length > 0;
   function handleSubmit() {
+    if (savingRef.current) return;
     setSubmitAttempted(true);
     const invalid = !testName.trim() || costPerTest === "" || chemicalRequirements.some(r => !r.chemicalId) || dilutionEnabled && dilutionChemicalRequirements.some(r => !r.chemicalId);
     if (invalid) return;
+    savingRef.current = true;
     onSave({
       id: initial?.id || uid("test"),
       testName: testName.trim(),
@@ -1110,6 +1115,7 @@ function TestTypeBuilder({
       qcRules,
       qcFrequency: qcFrequency === "" ? null : Number(qcFrequency)
     });
+    savingRef.current = false;
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col gap-3"
@@ -1127,7 +1133,7 @@ function TestTypeBuilder({
     title: "Basic Info",
     subtitle: "Name, method, cost & default equipment"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-3"
+    className: "grid grid-cols-1 md:grid-cols-2 gap-3"
   }, /*#__PURE__*/React.createElement(TextField, {
     label: "Name of Test",
     value: testName,
@@ -1326,6 +1332,20 @@ function TestTypesTab({
   const [importParsed, setImportParsed] = useState(null); // { drafts, errors }
   const [importProgress, setImportProgress] = useState(0);
   const [importFileError, setImportFileError] = useState("");
+  // ---- Data Density redesign: the list used to be one full SectionCard per
+  // test type stacked vertically (very tall, very little visible at once).
+  // Now a dense, sticky-header, zebra-striped table — click a row to expand
+  // its chemical/gas requirement detail inline, same info as before.
+  const [ttSearch, setTtSearch] = useState("");
+  const [ttExpanded, setTtExpanded] = useState({});
+  const [ttPage, setTtPage] = useState(1);
+  const TT_PAGE_SIZE = 12;
+  function toggleTtExpand(id) {
+    setTtExpanded(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  }
   function equipmentName(id) {
     return equipment.find(e => e.id === id)?.name || "—";
   }
@@ -1858,6 +1878,11 @@ function TestTypesTab({
       }
     }, 180);
   }
+  const ttq = ttSearch.trim().toLowerCase();
+  const ttFiltered = !ttq ? testTypes : testTypes.filter(t => [t.name, t.testName, t.method, equipmentName(t.defaultEquipmentId)].some(v => (v || "").toLowerCase().includes(ttq)));
+  const ttTotalPages = Math.max(1, Math.ceil(ttFiltered.length / TT_PAGE_SIZE));
+  const ttPageClamped = Math.min(ttPage, ttTotalPages);
+  const ttPageRows = ttFiltered.slice((ttPageClamped - 1) * TT_PAGE_SIZE, ttPageClamped * TT_PAGE_SIZE);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-4 flex-wrap gap-2"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1866,8 +1891,27 @@ function TestTypesTab({
       color: C.muted
     }
   }, "Design test types here — equipment, chemical/gas requirements, dummy defaults, and cost. \"Add Test Record\" simply loads whatever is designed here."), /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 flex-wrap"
-  }, /*#__PURE__*/React.createElement(Button, {
+    className: "flex gap-2 flex-wrap items-center"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "flex items-center gap-1.5 text-xs",
+    style: {
+      color: C.muted
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "search",
+    size: 13
+  }), /*#__PURE__*/React.createElement("input", {
+    value: ttSearch,
+    onChange: e => {
+      setTtSearch(e.target.value);
+      setTtPage(1);
+    },
+    placeholder: "Search name, method, equipment…",
+    className: "border rounded px-2 py-1 text-xs w-52",
+    style: {
+      borderColor: C.border
+    }
+  })), /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
     size: "sm",
     onClick: () => {
@@ -1883,31 +1927,101 @@ function TestTypesTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
-  }), "New Test Type"))), /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mb-3 p-2 rounded",
+  }), "New Test Type"))), /*#__PURE__*/React.createElement(Banner, {
+    tone: "info",
+    storageKey: "testtypes-import-export-tip"
+  }, "Export a test type to share its full setup (chemicals, gases, machine, requirements) with another lab as a .json file. Importing recreates the test type(s) here from .xlsx, .csv, or .json — reusing any chemical/gas/machine that already exists by name and creating what's missing."), ttFiltered.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
+    icon: "beaker",
+    title: testTypes.length === 0 ? "No test types yet" : "No test types match your search",
+    subtitle: testTypes.length === 0 ? "Design one — equipment, chemical/gas requirements, and cost per sample." : "Try a different name, method, or equipment.",
+    action: testTypes.length === 0 ? /*#__PURE__*/React.createElement(Button, {
+      size: "sm",
+      onClick: () => setShowBuilder(true)
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "plus",
+      size: 13
+    }), "New Test Type") : undefined
+  }), ttFiltered.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "rounded-lg overflow-hidden mb-1",
     style: {
-      background: C.infoBg,
-      color: C.info
+      border: `1px solid ${C.border}`
     }
-  }, "Export a test type to share its full setup (chemicals, gases, machine, requirements) with another lab as a .json file. Importing recreates the test type(s) here from .xlsx, .csv, or .json — reusing any chemical/gas/machine that already exists by name and creating what's missing."), testTypes.length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-sm",
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "overflow-x-auto max-h-[70vh] overflow-y-auto"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full text-sm border-collapse"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
-      color: C.muted
+      background: C.bg
     }
-  }, "No test types yet — create one to get started."), testTypes.map(t => /*#__PURE__*/React.createElement(SectionCard, {
-    key: t.id,
-    title: /*#__PURE__*/React.createElement("span", {
+  }, ["Test Type", "Method", "Cost / Sample", "Default Equipment", "Requirements", ""].map(h => /*#__PURE__*/React.createElement("th", {
+    key: h,
+    className: "text-left px-3 py-2.5 text-xs font-semibold sticky top-0",
+    style: {
+      color: C.muted,
+      background: C.bg,
+      borderBottom: `1px solid ${C.border}`,
+      zIndex: 1
+    }
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, ttPageRows.map((t, idx) => {
+    const isOpen = !!ttExpanded[t.id];
+    const reqCount = (t.chemicalRequirements || []).length + (t.gasRequirements || []).length;
+    const mainRow = /*#__PURE__*/React.createElement("tr", {
+      key: t.id,
+      className: "cursor-pointer",
+      onClick: () => toggleTtExpand(t.id),
+      style: {
+        borderTop: `1px solid ${C.border}`,
+        background: isOpen ? `${C.teal}0F` : idx % 2 === 1 ? C.bg : C.card
+      }
+    }, /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5"
+    }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-2"
-    }, t.name, /*#__PURE__*/React.createElement(Badge, {
-      tone: "info"
-    }, "৳", fmtNum(t.costPerTest || 0), "/sample")),
-    icon: /*#__PURE__*/React.createElement(Icon, {
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: isOpen ? "chevronDown" : "chevronRight",
+      size: 13,
+      color: C.muted
+    }), /*#__PURE__*/React.createElement(Icon, {
       name: "beaker",
-      size: 16,
+      size: 14,
       color: C.teal
-    }),
-    right: /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center gap-1"
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "font-semibold",
+      style: {
+        color: C.ink
+      }
+    }, t.name))), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5",
+      style: {
+        color: C.muted
+      }
+    }, t.method || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5"
+    }, /*#__PURE__*/React.createElement(Badge, {
+      tone: "info"
+    }, "৳", fmtNum(t.costPerTest || 0), "/sample")), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5",
+      style: {
+        color: C.muted
+      }
+    }, t.defaultEquipmentId ? equipmentName(t.defaultEquipmentId) : "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5"
+    }, reqCount === 0 ? /*#__PURE__*/React.createElement(Badge, {
+      tone: "muted"
+    }, "Entry / revenue only") : /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-1 flex-wrap"
+    }, (t.chemicalRequirements || []).length > 0 && /*#__PURE__*/React.createElement(Badge, {
+      tone: "ok"
+    }, (t.chemicalRequirements || []).length, " chemical"), (t.gasRequirements || []).length > 0 && /*#__PURE__*/React.createElement(Badge, {
+      tone: "info"
+    }, (t.gasRequirements || []).length, " gas"), t.dilutionEnabled && /*#__PURE__*/React.createElement(Badge, {
+      tone: "warn"
+    }, "Dilution"))), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5 text-right",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-end gap-1"
     }, /*#__PURE__*/React.createElement(IconButton, {
       name: "download",
       color: C.info,
@@ -1923,58 +2037,65 @@ function TestTypesTab({
       color: C.warn,
       title: "Delete test type",
       onClick: () => setDeleteFor(t)
-    }))
-  }, deleteFor?.id === t.id && /*#__PURE__*/React.createElement(ConfirmBar, {
-    text: `Delete test type "${t.name}"? This cannot be undone.`,
-    onConfirm: () => handleDelete(t),
-    onCancel: () => setDeleteFor(null)
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mb-2 flex flex-wrap gap-x-4 gap-y-1",
-    style: {
-      color: C.muted
-    }
-  }, /*#__PURE__*/React.createElement("span", null, "Name of Test: ", /*#__PURE__*/React.createElement("strong", {
-    style: {
-      color: C.ink
-    }
-  }, t.testName || t.name)), /*#__PURE__*/React.createElement("span", null, "Method: ", /*#__PURE__*/React.createElement("strong", {
-    style: {
-      color: C.ink
-    }
-  }, t.method || "—")), /*#__PURE__*/React.createElement("span", null, "Cost per sample: ", /*#__PURE__*/React.createElement("strong", {
-    style: {
-      color: C.ink
-    }
-  }, "৳", fmtNum(t.costPerTest || 0))), /*#__PURE__*/React.createElement("span", null, "Default equipment: ", /*#__PURE__*/React.createElement("strong", {
-    style: {
-      color: C.ink
-    }
-  }, t.defaultEquipmentId ? equipmentName(t.defaultEquipmentId) : "—"))), /*#__PURE__*/React.createElement("div", {
-    className: "text-xs",
-    style: {
-      color: C.muted
-    }
-  }, (t.chemicalRequirements || []).length === 0 && (t.gasRequirements || []).length === 0 ? "No chemical or gas requirement — pure entry/revenue test." : /*#__PURE__*/React.createElement("ul", {
-    className: "list-disc pl-4"
-  }, (t.chemicalRequirements || []).map((r, i) => /*#__PURE__*/React.createElement("li", {
-    key: `c${i}`
-  }, r.chemical, " — ", r.items.map(it => it.label).join(", "))), (t.gasRequirements || []).length > 0 && /*#__PURE__*/React.createElement("li", {
-    key: "g"
-  }, "Gas: ", t.gasRequirements.map(g => g.gasName).join(", ")))), t.dilutionEnabled && /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mt-2 pt-2 flex flex-wrap gap-x-4 gap-y-1",
-    style: {
-      borderTop: `1px solid ${C.border}`,
-      color: C.muted
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center gap-1"
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "beaker",
-    size: 12,
-    color: C.info
-  }), "Dilution supported:"), (t.dilutionChemicalRequirements || []).map((r, i) => /*#__PURE__*/React.createElement("span", {
-    key: `dc${i}`
-  }, r.chemical, " (", r.items.map(it => it.label).join(", "), ")")), (t.dilutionGasRequirements || []).length > 0 && /*#__PURE__*/React.createElement("span", null, "Gas: ", t.dilutionGasRequirements.map(g => g.gasName).join(", ")), (t.dilutionChemicalRequirements || []).length === 0 && (t.dilutionGasRequirements || []).length === 0 && /*#__PURE__*/React.createElement("span", null, "no extra chemical/gas configured")))), showBuilder && /*#__PURE__*/React.createElement(Modal, {
+    }))));
+    const detailRow = !isOpen ? null : /*#__PURE__*/React.createElement("tr", {
+      key: t.id + "-detail"
+    }, /*#__PURE__*/React.createElement("td", {
+      colSpan: 6,
+      className: "px-4 py-3",
+      style: {
+        background: `${C.teal}0F`,
+        borderTop: "none"
+      }
+    }, deleteFor?.id === t.id && /*#__PURE__*/React.createElement(ConfirmBar, {
+      text: `Delete test type "${t.name}"? This cannot be undone.`,
+      onConfirm: () => handleDelete(t),
+      onCancel: () => setDeleteFor(null)
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "text-xs mb-2 flex flex-wrap gap-x-4 gap-y-1",
+      style: {
+        color: C.muted
+      }
+    }, /*#__PURE__*/React.createElement("span", null, "Name of Test: ", /*#__PURE__*/React.createElement("strong", {
+      style: {
+        color: C.ink
+      }
+    }, t.testName || t.name))), /*#__PURE__*/React.createElement("div", {
+      className: "text-xs",
+      style: {
+        color: C.muted
+      }
+    }, reqCount === 0 ? "No chemical or gas requirement — pure entry/revenue test." : /*#__PURE__*/React.createElement("ul", {
+      className: "list-disc pl-4"
+    }, (t.chemicalRequirements || []).map((r, i) => /*#__PURE__*/React.createElement("li", {
+      key: `c${i}`
+    }, r.chemical, " — ", r.items.map(it => it.label).join(", "))), (t.gasRequirements || []).length > 0 && /*#__PURE__*/React.createElement("li", {
+      key: "g"
+    }, "Gas: ", t.gasRequirements.map(g => g.gasName).join(", ")))), t.dilutionEnabled && /*#__PURE__*/React.createElement("div", {
+      className: "text-xs mt-2 pt-2 flex flex-wrap gap-x-4 gap-y-1",
+      style: {
+        borderTop: `1px solid ${C.border}`,
+        color: C.muted
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center gap-1"
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "beaker",
+      size: 12,
+      color: C.info
+    }), "Dilution supported:"), (t.dilutionChemicalRequirements || []).map((r, i) => /*#__PURE__*/React.createElement("span", {
+      key: `dc${i}`
+    }, r.chemical, " (", r.items.map(it => it.label).join(", "), ")")), (t.dilutionGasRequirements || []).length > 0 && /*#__PURE__*/React.createElement("span", null, "Gas: ", t.dilutionGasRequirements.map(g => g.gasName).join(", ")), (t.dilutionChemicalRequirements || []).length === 0 && (t.dilutionGasRequirements || []).length === 0 && /*#__PURE__*/React.createElement("span", null, "no extra chemical/gas configured"))));
+    return /*#__PURE__*/React.createElement(React.Fragment, {
+      key: t.id
+    }, mainRow, detailRow);
+  })))), /*#__PURE__*/React.createElement(Pagination, {
+    page: ttPageClamped,
+    totalPages: ttTotalPages,
+    totalItems: ttFiltered.length,
+    pageSize: TT_PAGE_SIZE,
+    onPageChange: setTtPage
+  })), showBuilder && /*#__PURE__*/React.createElement(Modal, {
     title: "Create New Test Type",
     onClose: () => setShowBuilder(false),
     wide: true
@@ -2020,7 +2141,7 @@ function TestTypesTab({
     style: {
       borderColor: C.border,
       color: C.muted,
-      background: "#FAFEFE"
+      background: C.subtle
     },
     onDragOver: e => e.preventDefault(),
     onDrop: e => {

@@ -217,14 +217,7 @@ function InventoryTab({
     size: 14
   }), t.label))), invTab === "chemicals" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end gap-2 mb-3 flex-wrap"
-  }, /*#__PURE__*/React.createElement(Button, {
-    variant: "ghost",
-    size: "sm",
-    onClick: () => downloadTemplate("chemicals")
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "download",
-    size: 14
-  }), "Download Template"), /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("input", {
     ref: chemUploadRef,
     type: "file",
     accept: ".xlsx,.xls,.csv",
@@ -240,7 +233,14 @@ function InventoryTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "upload",
     size: 14
-  }), "Import from Excel"), /*#__PURE__*/React.createElement(Button, {
+  }), "Import Data"), /*#__PURE__*/React.createElement(Button, {
+    variant: "ghost",
+    size: "sm",
+    onClick: () => downloadTemplate("chemicals")
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "download",
+    size: 14
+  }), "Download Template"), /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
     size: "sm",
     onClick: () => setShowMasterList(true)
@@ -253,18 +253,21 @@ function InventoryTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
-  }), "Add Chemical")), /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mb-3 p-2 rounded",
-    style: {
-      background: C.infoBg,
-      color: C.info
-    }
-  }, "One Excel file can contain rows for many different chemicals at once — rows are grouped automatically by \"ChemicalName\". New chemicals must be picked from the Master Chemical List — this prevents the same chemical being added twice by mistake."), chemicals.length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-sm mb-3",
-    style: {
-      color: C.muted
-    }
-  }, "No chemicals yet — add one to get started."), chemicals.map(chem => {
+  }), "Add Chemical")), /*#__PURE__*/React.createElement(Banner, {
+    tone: "info",
+    storageKey: "inventory-chemicals-import-tip"
+  }, "One Excel file can contain rows for many different chemicals at once — rows are grouped automatically by \"ChemicalName\". New chemicals must be picked from the Master Chemical List — this prevents the same chemical being added twice by mistake."), chemicals.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
+    icon: "flask",
+    title: "No chemicals yet",
+    subtitle: "Add a chemical to start tracking stock, expiry, and consumption.",
+    action: /*#__PURE__*/React.createElement(Button, {
+      size: "sm",
+      onClick: () => setShowAddChemical(true)
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "plus",
+      size: 13
+    }), "Add Chemical")
+  }), chemicals.map(chem => {
     const isCollapsed = !!collapsedChem[chem.id];
     return /*#__PURE__*/React.createElement(SectionCard, {
       key: chem.id,
@@ -306,7 +309,7 @@ function InventoryTab({
       text: `Delete chemical "${chem.name}"? This cannot be undone.`,
       onConfirm: () => deleteChemical(chem),
       onCancel: () => setDeleteChemicalFor(null)
-    }), !isCollapsed && /*#__PURE__*/React.createElement("table", {
+    }), !isCollapsed && /*#__PURE__*/React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", {
       className: "w-full text-xs"
     }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
       style: {
@@ -415,7 +418,7 @@ function InventoryTab({
           batch: b
         })
       }))));
-    }))), deleteBatch && deleteBatch.chemId === chem.id && /*#__PURE__*/React.createElement(ConfirmBar, {
+    })))), deleteBatch && deleteBatch.chemId === chem.id && /*#__PURE__*/React.createElement(ConfirmBar, {
       text: `Delete this batch (received ${deleteBatch.batch.dateReceived})? This cannot be undone.`,
       onConfirm: () => deleteBatchNow(chem.id, deleteBatch.batch),
       onCancel: () => setDeleteBatch(null)
@@ -519,14 +522,7 @@ function InventoryTab({
     }),
     right: /*#__PURE__*/React.createElement("div", {
       className: "flex gap-2 flex-wrap"
-    }, /*#__PURE__*/React.createElement(Button, {
-      variant: "ghost",
-      size: "sm",
-      onClick: () => downloadTemplate("glassware")
-    }, /*#__PURE__*/React.createElement(Icon, {
-      name: "download",
-      size: 13
-    }), "Template"), /*#__PURE__*/React.createElement("input", {
+    }, /*#__PURE__*/React.createElement("input", {
       ref: glassUploadRef,
       type: "file",
       accept: ".xlsx,.xls,.csv",
@@ -542,7 +538,14 @@ function InventoryTab({
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "upload",
       size: 13
-    }), "Import"), /*#__PURE__*/React.createElement(Button, {
+    }), "Import Data"), /*#__PURE__*/React.createElement(Button, {
+      variant: "ghost",
+      size: "sm",
+      onClick: () => downloadTemplate("glassware")
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "download",
+      size: 13
+    }), "Download Template"), /*#__PURE__*/React.createElement(Button, {
       size: "sm",
       onClick: () => setShowAddGlass(true)
     }, /*#__PURE__*/React.createElement(Icon, {
@@ -555,7 +558,7 @@ function InventoryTab({
       background: C.infoBg,
       color: C.info
     }
-  }, "One Excel file can list many different glassware item types at once — each row becomes its own item."), /*#__PURE__*/React.createElement("table", {
+  }, "One Excel file can list many different glassware item types at once — each row becomes its own item."), /*#__PURE__*/React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", {
     className: "w-full text-xs"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -669,7 +672,7 @@ function InventoryTab({
       },
       onCancel: () => setDeleteGlassFor(null)
     }))));
-  }))), showAddGlass && /*#__PURE__*/React.createElement(Modal, {
+  })))), showAddGlass && /*#__PURE__*/React.createElement(Modal, {
     title: "Add Glassware",
     onClose: () => setShowAddGlass(false)
   }, /*#__PURE__*/React.createElement(AddGlasswareForm, {
@@ -732,14 +735,7 @@ function InventoryTab({
     onCancel: () => setMoveFormFor(null)
   }))), invTab === "equipment" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end gap-2 mb-3 flex-wrap"
-  }, /*#__PURE__*/React.createElement(Button, {
-    variant: "ghost",
-    size: "sm",
-    onClick: () => downloadTemplate("equipment")
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "download",
-    size: 14
-  }), "Download Template"), /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("input", {
     ref: equipUploadRef,
     type: "file",
     accept: ".xlsx,.xls,.csv",
@@ -755,7 +751,14 @@ function InventoryTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "upload",
     size: 14
-  }), "Import from Excel"), /*#__PURE__*/React.createElement(Button, {
+  }), "Import Data"), /*#__PURE__*/React.createElement(Button, {
+    variant: "ghost",
+    size: "sm",
+    onClick: () => downloadTemplate("equipment")
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "download",
+    size: 14
+  }), "Download Template"), /*#__PURE__*/React.createElement(Button, {
     size: "sm",
     onClick: () => setShowAddEquip(true)
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -829,7 +832,7 @@ function InventoryTab({
       style: {
         color: C.ink
       }
-    }, eq.receivedFrom || "—"))), /*#__PURE__*/React.createElement("table", {
+    }, eq.receivedFrom || "—"))), /*#__PURE__*/React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", {
       className: "w-full text-xs"
     }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
       style: {
@@ -913,7 +916,7 @@ function InventoryTab({
         notify("Event deleted");
       },
       onCancel: () => setDeleteEvent(null)
-    })))))))));
+    }))))))))));
   }), showAddEquip && /*#__PURE__*/React.createElement(Modal, {
     title: "Add Equipment",
     onClose: () => setShowAddEquip(false)
@@ -1044,7 +1047,7 @@ function InventoryTab({
       text: `Delete gas "${g.name}"? This cannot be undone.`,
       onConfirm: () => deleteGasType(g),
       onCancel: () => setDeleteGasFor(null)
-    }), !isCollapsed && /*#__PURE__*/React.createElement("table", {
+    }), !isCollapsed && /*#__PURE__*/React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", {
       className: "w-full text-xs"
     }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
       style: {
@@ -1190,7 +1193,7 @@ function InventoryTab({
           cylinder: c
         })
       }))));
-    }))), deleteCylinder && deleteCylinder.gasId === g.id && /*#__PURE__*/React.createElement(ConfirmBar, {
+    })))), deleteCylinder && deleteCylinder.gasId === g.id && /*#__PURE__*/React.createElement(ConfirmBar, {
       text: `Delete this cylinder (received ${deleteCylinder.cylinder.dateReceived})? This cannot be undone.`,
       onConfirm: () => deleteCylinderNow(g.id, deleteCylinder.cylinder),
       onCancel: () => setDeleteCylinder(null)
@@ -1318,7 +1321,7 @@ function InventoryTab({
   })), historyFor && /*#__PURE__*/React.createElement(Modal, {
     title: `Cylinder History — received ${historyFor.cylinder.dateReceived}`,
     onClose: () => setHistoryFor(null)
-  }, /*#__PURE__*/React.createElement("table", {
+  }, /*#__PURE__*/React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", {
     className: "w-full text-xs"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -1352,7 +1355,7 @@ function InventoryTab({
     className: "py-1.5"
   }, h.cost ? `৳${fmtNum(h.cost)}` : "—"), /*#__PURE__*/React.createElement("td", {
     className: "py-1.5"
-  }, h.note || "—"))))), /*#__PURE__*/React.createElement("div", {
+  }, h.note || "—")))))), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end mt-3"
   }, /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
@@ -1428,7 +1431,7 @@ function MasterChemicalListModal({
       key: n,
       className: "flex items-center justify-between text-sm px-2 py-1.5 rounded gap-2",
       style: {
-        background: "#FAFEFE",
+        background: C.subtle,
         border: `1px solid ${C.border}`
       }
     }, isEditing ? /*#__PURE__*/React.createElement("input", {

@@ -9,14 +9,18 @@ function seedUsers() {
   return [{
     id: uid("user"),
     username: "admin",
-    password: "admin123",
+    // SHA-256("admin123") — verified against hashPassword() in 40-auth-ui.js.
+    // Demo credentials are admin/admin123 and tester/tester123 either way;
+    // this just means even the seed data isn't sitting there in plaintext.
+    passwordHash: "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
     name: "Lab Administrator",
     designation: "Senior Chemist",
     role: "Administrator"
   }, {
     id: uid("user"),
     username: "tester",
-    password: "tester123",
+    // SHA-256("tester123")
+    passwordHash: "854ddc006369eb7bac38bb6690e7f9b05d0d68659be1f96564df407d653e0df2",
     name: "Lab Technician",
     designation: "Sample Analyzer",
     role: "Technician"

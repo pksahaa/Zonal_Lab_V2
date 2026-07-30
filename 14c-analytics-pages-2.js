@@ -178,7 +178,7 @@ function InventoryAnalyticsPage({
       labels: ["Chem Active", "Chem Expired", "Chem Depleted", "Equip Functional", "Equip Broken"],
       datasets: [{
         data: [active, expired, depleted, functional, broken],
-        backgroundColor: [C.ok, "#E63946", C.muted, C.teal, C.warn],
+        backgroundColor: [C.ok, C.danger, C.muted, C.teal, C.warn],
         borderWidth: 2,
         borderColor: "#fff"
       }]
@@ -789,7 +789,7 @@ function PredictiveInventoryPage({
       datasets: [{
         label: "Days Remaining",
         data: urgent.map(u => +u.daysLeft.toFixed(1)),
-        backgroundColor: urgent.map(u => u.daysLeft < 7 ? "#E63946" : u.daysLeft < 14 ? C.warn : C.ok),
+        backgroundColor: urgent.map(u => u.daysLeft < 7 ? C.danger : u.daysLeft < 14 ? C.warn : C.ok),
         borderRadius: 4
       }]
     },
@@ -916,7 +916,7 @@ function EquipmentAnalyticsPage({
     key: i,
     value: s.uptimePct,
     label: s.name,
-    color: s.uptimePct > 90 ? C.ok : s.uptimePct > 70 ? C.warn : "#E63946"
+    color: s.uptimePct > 90 ? C.ok : s.uptimePct > 70 ? C.warn : C.danger
   })), stats.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "text-xs py-4",
     style: {
@@ -1185,7 +1185,7 @@ function MaintenanceAnalyticsPage({
       datasets: [{
         label: "Breakdowns",
         data: breakdownEntries.map(e => e[1]),
-        backgroundColor: "#E63946",
+        backgroundColor: C.danger,
         borderRadius: 4
       }]
     },
@@ -1595,6 +1595,29 @@ function DailyTrendsPage({
 }
 
 // ==================================== FORECAST REPORTS ====================================
+// Monthly Progress Report — a genuinely new report type (distinct from
+// Monthly Trends analytics), requested as a Custom Report sub-page. Not
+// built yet — this is an honest placeholder rather than a half-working
+// stand-in, so it's clear what still needs to be scoped/built (likely: a
+// month-over-month summary of samples registered/tested/approved/released,
+// printable like the other Custom Report pages).
+function MonthlyProgressReportPage({
+  notify
+}) {
+  return /*#__PURE__*/React.createElement(SectionCard, {
+    title: "Monthly Progress Report",
+    icon: /*#__PURE__*/React.createElement(Icon, {
+      name: "chart",
+      size: 15
+    })
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm p-4 rounded",
+    style: {
+      background: C.infoBg,
+      color: C.info
+    }
+  }, "This report type isn't built yet — it needs its own design (likely a month-by-month summary of samples registered / tested / approved / released, printable like the other Custom Report pages). Let me know what fields and layout you want and I'll build it next."));
+}
 function ForecastPage({
   filteredRecords
 }) {
@@ -1782,7 +1805,7 @@ function ForecastPage({
 }
 // ---------------- Report page registry ----------------
 const REPORT_GROUPS = [{
-  group: "Overview",
+  group: "Report & Analytics",
   pages: [{
     k: "executive",
     label: "Executive Dashboard",
@@ -1791,10 +1814,7 @@ const REPORT_GROUPS = [{
     k: "insights",
     label: "Smart Insights",
     icon: "warning"
-  }]
-}, {
-  group: "Operations",
-  pages: [{
+  }, {
     k: "testAnalytics",
     label: "Test Analytics",
     icon: "clipboard"
@@ -1806,10 +1826,7 @@ const REPORT_GROUPS = [{
     k: "revenue",
     label: "Revenue Analytics",
     icon: "coins"
-  }]
-}, {
-  group: "Inventory",
-  pages: [{
+  }, {
     k: "chemicalAnalytics",
     label: "Chemical Analytics",
     icon: "flask"
@@ -1829,10 +1846,7 @@ const REPORT_GROUPS = [{
     k: "predictiveInventory",
     label: "Predictive Inventory",
     icon: "chart"
-  }]
-}, {
-  group: "Equipment",
-  pages: [{
+  }, {
     k: "equipmentAnalytics",
     label: "Equipment Analytics",
     icon: "wrench"
@@ -1840,10 +1854,7 @@ const REPORT_GROUPS = [{
     k: "maintenanceAnalytics",
     label: "Maintenance Analytics",
     icon: "wrench"
-  }]
-}, {
-  group: "Trends & Forecast",
-  pages: [{
+  }, {
     k: "monthlyTrends",
     label: "Monthly Trends",
     icon: "chart"
@@ -1856,82 +1867,91 @@ const REPORT_GROUPS = [{
     label: "Forecast Reports",
     icon: "chart"
   }]
+}, {
+  group: "Custom Report",
+  pages: [{
+    k: "customReport",
+    label: "Multiple Sample Report",
+    icon: "printer"
+  }, {
+    k: "customReportSingle",
+    label: "Single Sample Report",
+    icon: "printer"
+  }, {
+    k: "monthlyProgressReport",
+    label: "Monthly Progress Report",
+    icon: "chart"
+  }]
 }];
 const ALL_REPORT_PAGES = REPORT_GROUPS.flatMap(g => g.pages);
 
 // ---------------- Report navigation: one dropdown per group (Overview / Operations / Inventory / Equipment / Trends & Forecast) ----------------
-function ReportGroupNav({
+// Top-level group pills — same rounded-full pill style as the Inventory
+// tab's Equipment/Glassware/Chemicals/Gas nav (see InventoryTab in
+// 11-inventory-ui.js), applied here instead of a dropdown-per-group menu.
+function ReportGroupPills({
+  activeGroup,
+  onSelectGroup
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2 mb-3 flex-wrap"
+  }, REPORT_GROUPS.map(grp => /*#__PURE__*/React.createElement("button", {
+    key: grp.group,
+    type: "button",
+    onClick: () => onSelectGroup(grp),
+    className: "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium",
+    style: {
+      background: activeGroup === grp.group ? C.teal : "#fff",
+      color: activeGroup === grp.group ? "#fff" : C.muted,
+      border: `1px solid ${activeGroup === grp.group ? C.teal : C.border}`
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: grp.group === "Custom Report" ? "printer" : "chart",
+    size: 14
+  }), grp.group)));
+}
+// Second-level page pills — used for Custom Report (only 3 pages, fits
+// the same pill style cleanly). Report & Analytics has 15 pages, which
+// doesn't fit a pill row — ReportPagePicker below handles that one with a
+// compact dropdown instead.
+function ReportPagePills({
+  pages,
   activePage,
   setReportTab
 }) {
-  const [openGroup, setOpenGroup] = React.useState(null);
-  const navRef = React.useRef(null);
-  React.useEffect(() => {
-    function onDocClick(e) {
-      if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
   return /*#__PURE__*/React.createElement("div", {
-    ref: navRef,
-    className: "rounded-lg mb-4 no-print px-3 py-2.5 flex items-center gap-2 flex-wrap",
+    className: "flex gap-2 mb-4 flex-wrap"
+  }, pages.map(p => /*#__PURE__*/React.createElement("button", {
+    key: p.k,
+    type: "button",
+    onClick: () => setReportTab(p.k),
+    className: "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium",
     style: {
-      background: C.card,
-      border: `1px solid ${C.border}`
+      background: activePage === p.k ? C.teal : "#fff",
+      color: activePage === p.k ? "#fff" : C.muted,
+      border: `1px solid ${activePage === p.k ? C.teal : C.border}`
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] font-bold uppercase tracking-wide mr-1 shrink-0",
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: p.icon,
+    size: 14
+  }), p.label)));
+}
+function ReportPagePicker({
+  pages,
+  activePage,
+  setReportTab
+}) {
+  return /*#__PURE__*/React.createElement("select", {
+    className: "border rounded-md px-3 py-1.5 text-sm mb-4",
     style: {
-      color: C.muted
-    }
-  }, "Browse:"), REPORT_GROUPS.map(grp => {
-    const activePageDef = grp.pages.find(p => p.k === activePage);
-    const isOpen = openGroup === grp.group;
-    return /*#__PURE__*/React.createElement("div", {
-      key: grp.group,
-      className: "relative"
-    }, /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      onClick: () => setOpenGroup(isOpen ? null : grp.group),
-      className: "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap",
-      style: {
-        background: activePageDef ? C.teal : "#fff",
-        color: activePageDef ? "#fff" : C.ink,
-        border: `1px solid ${activePageDef ? C.teal : C.border}`
-      }
-    }, grp.group, activePageDef && /*#__PURE__*/React.createElement("span", {
-      className: "hidden md:inline font-normal opacity-90"
-    }, "· ", activePageDef.label), /*#__PURE__*/React.createElement(Icon, {
-      name: isOpen ? "chevronDown" : "chevronRight",
-      size: 10,
-      color: activePageDef ? "#fff" : C.muted
-    })), isOpen && /*#__PURE__*/React.createElement("div", {
-      className: "absolute z-40 mt-1 rounded-lg shadow-lg py-1.5",
-      style: {
-        background: "#fff",
-        border: `1px solid ${C.border}`,
-        minWidth: 230
-      }
-    }, grp.pages.map(p => /*#__PURE__*/React.createElement("button", {
-      key: p.k,
-      type: "button",
-      onClick: () => {
-        setReportTab(p.k);
-        setOpenGroup(null);
-      },
-      className: "w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50",
-      style: {
-        color: p.k === activePage ? C.teal : C.ink,
-        fontWeight: p.k === activePage ? 700 : 500,
-        background: p.k === activePage ? C.infoBg : "transparent"
-      }
-    }, /*#__PURE__*/React.createElement(Icon, {
-      name: p.icon,
-      size: 13,
-      color: p.k === activePage ? C.teal : C.muted
-    }), p.label))));
-  }));
+      borderColor: C.border
+    },
+    value: activePage,
+    onChange: e => setReportTab(e.target.value)
+  }, pages.map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.k,
+    value: p.k
+  }, p.label)));
 }
 function rangeDaysCount(filters, testRecords) {
   if (filters.dateFrom && filters.dateTo) return Math.max(1, daysBetweenD(filters.dateFrom, filters.dateTo) + 1);
@@ -1951,9 +1971,13 @@ function ReportsTab({
   testTypes,
   testRecords,
   samples,
+  setSamples,
+  references,
   subBatches,
   users,
+  session,
   notify,
+  goToSample,
   onLoadDemoData
 }) {
   const [filters, setFilters] = React.useState(DEFAULT_FILTERS);
@@ -2033,8 +2057,12 @@ function ReportsTab({
     rangeDays,
     batchNameById,
     samples,
+    setSamples,
+    references,
     subBatches,
     users,
+    session,
+    goToSample,
     notify
   };
   function printReport() {
@@ -2042,7 +2070,6 @@ function ReportsTab({
   }
   const activePageDef = ALL_REPORT_PAGES.find(p => p.k === activePage);
   const activeGroupDef = REPORT_GROUPS.find(grp => grp.pages.some(p => p.k === activePage));
-  const [reportSection, setReportSection] = React.useState("analytics"); // "analytics" | "custom"
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between mb-4 no-print flex-wrap gap-3"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
@@ -2086,25 +2113,25 @@ function ReportsTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "printer",
     size: 13
-  }), "Print / Save as PDF"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 mb-4 no-print"
-  }, [{ k: "analytics", label: "Reports & Analytics" }, { k: "custom", label: "Custom Report" }].map(t => /*#__PURE__*/React.createElement("button", {
-    key: t.k,
-    onClick: () => setReportSection(t.k),
-    className: "px-3 py-1.5 rounded text-sm font-medium",
-    style: {
-      background: reportSection === t.k ? C.teal : "#fff",
-      color: reportSection === t.k ? "#fff" : C.muted,
-      border: `1px solid ${reportSection === t.k ? C.teal : C.border}`
-    }
-  }, t.label))), reportSection === "analytics" && /*#__PURE__*/React.createElement(FilterPanel, {
+  }), "Print / Save as PDF"))), /*#__PURE__*/React.createElement(FilterPanel, {
     filters: filters,
     setFilters: setFilters,
     facets: facets
-  }), reportSection === "analytics" && /*#__PURE__*/React.createElement(ReportGroupNav, {
+  }), /*#__PURE__*/React.createElement(ReportGroupPills, {
+    activeGroup: activeGroupDef?.group,
+    onSelectGroup: grp => setReportTab(grp.pages[0].k)
+  }), activeGroupDef?.group === "Custom Report" ? /*#__PURE__*/React.createElement(ReportPagePills, {
+    pages: activeGroupDef.pages,
     activePage: activePage,
     setReportTab: setReportTab
-  }), reportSection === "analytics" && /*#__PURE__*/React.createElement("div", {
+  }) : /*#__PURE__*/React.createElement(ReportPagePicker, {
+    pages: activeGroupDef?.pages || [],
+    activePage: activePage,
+    setReportTab: setReportTab
+  }), /*#__PURE__*/React.createElement("div", {
     className: "mt-4"
-  }, activePage === "executive" && /*#__PURE__*/React.createElement(ExecutiveDashboardPage, shared), activePage === "insights" && /*#__PURE__*/React.createElement(SmartInsightsPage, shared), activePage === "testAnalytics" && /*#__PURE__*/React.createElement(TestAnalyticsPage, shared), activePage === "technician" && /*#__PURE__*/React.createElement(TechnicianPerformancePage, shared), activePage === "revenue" && /*#__PURE__*/React.createElement(RevenueAnalyticsPage, shared), activePage === "chemicalAnalytics" && /*#__PURE__*/React.createElement(ChemicalAnalyticsPage, shared), activePage === "inventoryAnalytics" && /*#__PURE__*/React.createElement(InventoryAnalyticsPage, shared), activePage === "glasswareAnalytics" && /*#__PURE__*/React.createElement(GlasswareAnalyticsPage, shared), activePage === "gasAnalytics" && /*#__PURE__*/React.createElement(GasAnalyticsPage, shared), activePage === "predictiveInventory" && /*#__PURE__*/React.createElement(PredictiveInventoryPage, shared), activePage === "equipmentAnalytics" && /*#__PURE__*/React.createElement(EquipmentAnalyticsPage, shared), activePage === "maintenanceAnalytics" && /*#__PURE__*/React.createElement(MaintenanceAnalyticsPage, shared), activePage === "monthlyTrends" && /*#__PURE__*/React.createElement(MonthlyTrendsPage, shared), activePage === "dailyTrends" && /*#__PURE__*/React.createElement(DailyTrendsPage, shared), activePage === "forecast" && /*#__PURE__*/React.createElement(ForecastPage, shared)), reportSection === "custom" && /*#__PURE__*/React.createElement(CustomReportSection, shared));
+  }, activePage === "executive" && /*#__PURE__*/React.createElement(ExecutiveDashboardPage, shared), activePage === "insights" && /*#__PURE__*/React.createElement(SmartInsightsPage, shared), activePage === "testAnalytics" && /*#__PURE__*/React.createElement(TestAnalyticsPage, shared), activePage === "technician" && /*#__PURE__*/React.createElement(TechnicianPerformancePage, shared), activePage === "revenue" && /*#__PURE__*/React.createElement(RevenueAnalyticsPage, shared), activePage === "chemicalAnalytics" && /*#__PURE__*/React.createElement(ChemicalAnalyticsPage, shared), activePage === "inventoryAnalytics" && /*#__PURE__*/React.createElement(InventoryAnalyticsPage, shared), activePage === "glasswareAnalytics" && /*#__PURE__*/React.createElement(GlasswareAnalyticsPage, shared), activePage === "gasAnalytics" && /*#__PURE__*/React.createElement(GasAnalyticsPage, shared), activePage === "predictiveInventory" && /*#__PURE__*/React.createElement(PredictiveInventoryPage, shared), activePage === "equipmentAnalytics" && /*#__PURE__*/React.createElement(EquipmentAnalyticsPage, shared), activePage === "maintenanceAnalytics" && /*#__PURE__*/React.createElement(MaintenanceAnalyticsPage, shared), activePage === "monthlyTrends" && /*#__PURE__*/React.createElement(MonthlyTrendsPage, shared), activePage === "dailyTrends" && /*#__PURE__*/React.createElement(DailyTrendsPage, shared), activePage === "forecast" && /*#__PURE__*/React.createElement(ForecastPage, shared), activePage === "customReport" && /*#__PURE__*/React.createElement(CustomReportGeneratorPage, shared), activePage === "customReportSingle" && /*#__PURE__*/React.createElement(CustomReportGeneratorPage, {
+    ...shared,
+    forceMode: "individual"
+  }), activePage === "monthlyProgressReport" && /*#__PURE__*/React.createElement(MonthlyProgressReportPage, shared)));
 }
