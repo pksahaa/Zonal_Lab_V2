@@ -33,7 +33,6 @@ function AddTestTab({
   const [selectedSubBatchId, setSelectedSubBatchId] = useState("");
   // Submit-guard for handleSave — see the try/finally wrapper below.
   const savingRef = React.useRef(false);
-  const memberBulkFileRef = React.useRef(null);
   // How the technician is choosing what to record results for — a clear
   // 3-way choice instead of two dropdowns shown side by side with "OR".
   const [selectionMode, setSelectionMode] = useState("individual"); // "individual" | "batch" | "subbatch"
@@ -70,6 +69,18 @@ function AddTestTab({
   // means "tester enabled/used this optional chemical for this record".
   const [optionalUsed, setOptionalUsed] = useState({});
   const [resultInputs, setResultInputs] = useState({}); // { [paramId]: { [inputKey]: value } }
+  // Direct result values applied via "Upload Results (Excel)" — the same
+  // mechanism that used to live on the Test Records tab as a post-save
+  // correction tool, now available here, pre-save, for both individual and
+  // Analytical Batch entry. Keyed by sampleId (selectedSampleId for
+  // individual mode, each member's sampleId for a sub-batch) → array of
+  // {paramId, name, unit, value, error}, same shape as a saved record's
+  // results/memberResults[].results. When present for a given parameter it
+  // is used as-is (bypassing formula evaluation) when the record is saved —
+  // this sidesteps any raw-reading/formula mismatch entirely, the same way
+  // it always has on the Test Records tab.
+  const [resultOverridesBySample, setResultOverridesBySample] = useState({});
+  const [showResultUploadModal, setShowResultUploadModal] = useState(false);
   const [qcSampleType, setQcSampleType] = useState(""); // "" | qcType matching a rule on selectedTest
   const [qcMeasuredValue, setQcMeasuredValue] = useState("");
   const [bracketingPoints, setBracketingPoints] = useState([]); // [{id,label,value}] — bracketing/interspersed QC only
@@ -201,99 +212,57 @@ function AddTestTab({
       value: +res.value.toFixed(param.roundTo ?? 2)
     } : res;
   }
-  // ---- Result Bulk Upload for the calculated-results grid (3.2) — lets a
-  // tester fill in an Excel sheet with raw readings for every sample in the
-  // Analytical Batch instead of typing each one into the table below. One
-  // column per parameter input (SampleCode + "<Param> - <input label>"),
-  // matched back onto memberInputs by Sample Code on import. ----
-  function downloadMemberInputsTemplate() {
-    if (!selectedSubBatch || !resultParameters.length) return;
-    const inputCols = [];
-    resultParameters.forEach(p => p.inputs.forEach(inp => inputCols.push({
-      header: `${p.name} - ${inp.label || inp.key}`,
-      paramId: p.id,
-      key: inp.key
-    })));
-    const headers = ["SampleCode", ...inputCols.map(c => c.header)];
-    const rows = selectedSubBatch.memberSampleIds.map(sampleId => {
-      const sample = (samples || []).find(s => s.id === sampleId);
-      return [sample?.sampleCode || sampleId, ...inputCols.map(c => memberInputs[sampleId]?.[c.paramId]?.[c.key] ?? "")];
-    });
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Results");
-    XLSX.writeFile(wb, `${(selectedTest?.name || "test").replace(/[^a-z0-9]+/gi, "_")}_${selectedSubBatch.label || "batch"}_readings.xlsx`);
+  // ---- Upload Results (Excel) — the direct-value bulk upload that used to
+  // live on the Test Records tab as a post-save "correct this record"
+  // action. It's moved here so it can be used pre-save, for both individual
+  // and Analytical Batch entry, and reuses the exact same modal/template
+  // logic (RecordBulkUploadModal, defined further down this file) by
+  // building a lightweight "pseudo record" out of the current in-progress
+  // form state instead of an already-saved test record. ----
+  function buildUploadPseudoRecord() {
+    if (selectedSubBatch) {
+      return {
+        testTypeId: selectedSubBatch.testTypeId,
+        testTypeName: selectedTest?.name || "",
+        date: testDate,
+        memberResults: selectedSubBatch.memberSampleIds.map(sampleId => {
+          const s = (samples || []).find(x => x.id === sampleId);
+          return {
+            sampleId,
+            sampleCode: s?.sampleCode || "",
+            results: resultOverridesBySample[sampleId] || []
+          };
+        })
+      };
+    }
+    if (selectedSample) {
+      return {
+        testTypeId: selectedTest?.id || "",
+        testTypeName: selectedTest?.name || "",
+        date: testDate,
+        sampleId: selectedSampleId,
+        sampleCode: selectedSample.sampleCode || "",
+        results: resultOverridesBySample[selectedSampleId] || []
+      };
+    }
+    return null;
   }
-  // Normalizes a header string so trivial Excel-side differences (extra
-  // whitespace, case, curly vs straight quotes, en/em-dash vs hyphen from
-  // autocorrect) don't cause a silent, unreported column-match failure —
-  // this was the actual root cause of "batch shows up in Awaiting Review
-  // but result values are missing": SampleCode matched fine (single fixed
-  // key), so the success toast looked right, while every parameter column
-  // silently failed to match and got skipped, leaving null/blank results.
-  function normalizeHeader(s) {
-    return String(s || "").replace(/[\u2010-\u2015]/g, "-") // en/em dash, minus → hyphen
-    .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim().replace(/\s+/g, " ").toLowerCase();
-  }
-  function handleMemberInputsBulkFile(file) {
-    if (!selectedSubBatch || !resultParameters.length) return;
-    readWorkbook(file, (err, rows) => {
-      if (err) return notify?.("Could not read Excel file", "warn");
-      const byCode = {};
-      selectedSubBatch.memberSampleIds.forEach(sampleId => {
-        const sample = (samples || []).find(s => s.id === sampleId);
-        if (sample?.sampleCode) byCode[normalizeHeader(sample.sampleCode)] = sampleId;
+  function applyPreSaveResultUpload(updatedMembers) {
+    setResultOverridesBySample(prev => {
+      const next = { ...prev };
+      updatedMembers.forEach(m => {
+        next[m.sampleId] = m.results;
       });
-      // Expected column → {paramId, key, name} map, keyed by normalized header —
-      // built fresh from the current resultParameters so it can't drift out of
-      // sync with downloadMemberInputsTemplate().
-      const expectedCols = {};
-      resultParameters.forEach(p => p.inputs.forEach(inp => {
-        expectedCols[normalizeHeader(`${p.name} - ${inp.label || inp.key}`)] = {
-          paramId: p.id,
-          key: inp.key,
-          name: `${p.name} - ${inp.label || inp.key}`
-        };
-      }));
-      let matchedSamples = 0;
-      let filledValues = 0;
-      const unmatchedSampleCodes = [];
-      rows.forEach(row => {
-        const rowKeys = Object.keys(row);
-        // Find the SampleCode-ish column regardless of exact header casing.
-        const codeKey = rowKeys.find(k => normalizeHeader(k) === "samplecode") || "SampleCode";
-        const codeVal = normalizeHeader(row[codeKey]);
-        const sampleId = byCode[codeVal];
-        if (!sampleId) {
-          if (codeVal) unmatchedSampleCodes.push(row[codeKey]);
-          return;
-        }
-        matchedSamples++;
-        rowKeys.forEach(k => {
-          if (k === codeKey) return;
-          const target = expectedCols[normalizeHeader(k)];
-          if (!target) return; // column doesn't correspond to any known parameter input — ignore, don't guess
-          const val = row[k];
-          if (val !== undefined && val !== "") {
-            setMemberInput(sampleId, target.paramId, target.key, val);
-            filledValues++;
-          }
-        });
-      });
-      const expectedValueCells = matchedSamples * Object.keys(expectedCols).length;
-      if (matchedSamples === 0) {
-        notify?.("No rows matched a Sample Code in this Analytical Batch — check the SampleCode column against the downloaded template.", "warn");
-      } else if (filledValues === 0) {
-        notify?.(`${matchedSamples} sample(s) matched by Sample Code, but 0 result values were read — the column headers don't match the expected parameter names. Re-download the template and paste your readings into it without renaming the header row.`, "warn");
-      } else if (filledValues < expectedValueCells) {
-        notify?.(`Bulk-filled ${filledValues} of ${expectedValueCells} expected value(s) across ${matchedSamples} sample(s). Some cells were blank or their column header didn't match — check before saving.`, "warn");
-      } else {
-        notify?.(`Bulk-filled readings for ${matchedSamples} of ${selectedSubBatch.memberSampleIds.length} sample(s). Click "Save Test Record" below to save them.`, "ok");
-      }
-      if (unmatchedSampleCodes.length) {
-        notify?.(`${unmatchedSampleCodes.length} row(s) had a Sample Code not in this Analytical Batch — ignored: ${unmatchedSampleCodes.slice(0, 5).join(", ")}${unmatchedSampleCodes.length > 5 ? "…" : ""}`, "warn");
-      }
+      return next;
     });
+    setShowResultUploadModal(false);
+    notify?.(`Filled results for ${updatedMembers.length} sample(s) from the upload. Click "${editingRecord ? "Update" : "Save"} Test Record" below to save.`, "ok");
+  }
+  function clearResultOverride(sampleId, paramId) {
+    setResultOverridesBySample(prev => ({
+      ...prev,
+      [sampleId]: (prev[sampleId] || []).filter(r => r.paramId !== paramId)
+    }));
   }
   function setMemberInput(sampleId, paramId, key, val) {
     setMemberInputs(prev => ({
@@ -328,6 +297,35 @@ function AddTestTab({
       }
     }, sample?.sampleCode)];
     resultParameters.forEach(p => {
+      const override = (resultOverridesBySample[sampleId] || []).find(r => r.paramId === p.id);
+      if (override) {
+        cells.push(/*#__PURE__*/React.createElement("td", {
+          key: p.id,
+          className: "p-1.5",
+          style: {
+            borderBottom: `1px solid ${C.border}`
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          className: "flex items-center gap-1.5"
+        }, /*#__PURE__*/React.createElement("span", {
+          className: "text-xs font-semibold px-1.5 py-0.5 rounded",
+          style: {
+            background: override.value != null ? C.okBg : C.warnBg,
+            color: override.value != null ? C.ok : C.warn
+          }
+        }, override.value != null ? `${fmtNum(override.value)}${override.unit ? ` ${override.unit}` : ""}` : override.error || "no value"), /*#__PURE__*/React.createElement("button", {
+          type: "button",
+          title: "Clear uploaded value and enter manually instead",
+          onClick: () => clearResultOverride(sampleId, p.id),
+          style: {
+            color: C.muted
+          }
+        }, /*#__PURE__*/React.createElement(Icon, {
+          name: "x",
+          size: 11
+        })))));
+        return;
+      }
       const res = computeMemberResult(sampleId, p);
       const inputEls = p.inputs.map(inp => /*#__PURE__*/React.createElement("input", {
         key: inp.id,
@@ -401,6 +399,11 @@ function AddTestTab({
         label: p.label,
         value: p.value === null || p.value === undefined ? "" : String(p.value)
       })) : []);
+      if (editingRecord.sampleId && (editingRecord.results || []).some(r => r.value != null)) {
+        setResultOverridesBySample({
+          [editingRecord.sampleId]: editingRecord.results
+        });
+      }
     }
   }, [editingRecord]);
 
@@ -425,6 +428,7 @@ function AddTestTab({
     setQcSampleType("");
     setQcMeasuredValue("");
     setBracketingPoints([]);
+    setResultOverridesBySample({});
   }, [selectedTestId]);
 
   // When a sample is picked: jump the Test Type selector to one of that sample's
@@ -438,6 +442,7 @@ function AddTestTab({
       if (firstReq) setSelectedTestId(firstReq.testTypeId);
     }
     setNumberOfFieldSamples(String(selectedSample.numberOfSamples || 1));
+    setResultOverridesBySample({});
   }, [selectedSampleId]);
   // When a sub-batch is picked: lock the Test Type to the sub-batch's method
   // and prefill No. of Field Samples from its member count.
@@ -445,6 +450,7 @@ function AddTestTab({
     if (editingRecord || !selectedSubBatch) return;
     setSelectedTestId(selectedSubBatch.testTypeId);
     setNumberOfFieldSamples(String(selectedSubBatch.memberSampleIds.length));
+    setResultOverridesBySample({});
   }, [selectedSubBatchId]);
   function setDirect(itemId, val) {
     setValues(prev => ({
@@ -567,6 +573,8 @@ function AddTestTab({
     setQcSampleType("");
     setQcMeasuredValue("");
     setBracketingPoints([]);
+    setResultOverridesBySample({});
+    setMemberInputs({});
   }
   function handleCancelEdit() {
     resetForm();
@@ -740,6 +748,8 @@ function AddTestTab({
       gasLog,
       resultInputs,
       results: selectedSubBatch ? [] : resultParameters.map(p => {
+        const override = (resultOverridesBySample[selectedSampleId] || []).find(r => r.paramId === p.id);
+        if (override) return override;
         const res = computeResult(p);
         return {
           paramId: p.id,
@@ -761,6 +771,8 @@ function AddTestTab({
           sampleId,
           sampleCode: memberSample?.sampleCode || "",
           results: resultParameters.map(p => {
+            const override = (resultOverridesBySample[sampleId] || []).find(r => r.paramId === p.id);
+            if (override) return override;
             const res = computeMemberResult(sampleId, p);
             return {
               paramId: p.id,
@@ -1489,15 +1501,47 @@ function AddTestTab({
       name: "chart",
       size: 16,
       color: C.teal
-    })
+    }),
+    right: selectedSample ? /*#__PURE__*/React.createElement(Button, {
+      variant: "outline",
+      size: "sm",
+      onClick: () => setShowResultUploadModal(true)
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "upload",
+      size: 12
+    }), "Upload Results (Excel)") : null
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: {
       color: C.muted
     }
-  }, "Enter the raw readings below — the final value is computed automatically from this method's formula."), /*#__PURE__*/React.createElement("div", {
+  }, "Enter the raw readings below — the final value is computed automatically from this method's formula. Or use \"Upload Results (Excel)\" to enter the finished value directly, bypassing the formula."), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col gap-3"
   }, resultParameters.map(p => {
+    const override = (resultOverridesBySample[selectedSampleId] || []).find(r => r.paramId === p.id);
+    if (override) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        className: "rounded p-2.5 flex items-center justify-between",
+        style: {
+          border: `1px solid ${C.border}`
+        }
+      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        className: "text-xs font-semibold mb-1",
+        style: {
+          color: C.ink
+        }
+      }, p.name || "(unnamed result)"), /*#__PURE__*/React.createElement("div", {
+        className: "text-sm font-semibold",
+        style: {
+          color: override.value != null ? C.ok : C.warn
+        }
+      }, override.value != null ? `${fmtNum(override.value)} ${override.unit || ""} (from upload)` : override.error || "no value")), /*#__PURE__*/React.createElement(Button, {
+        variant: "outline",
+        size: "sm",
+        onClick: () => clearResultOverride(selectedSampleId, p.id)
+      }, "Clear"));
+    }
     const res = computeResult(p);
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
@@ -1547,34 +1591,14 @@ function AddTestTab({
       size: 16,
       color: C.teal
     }),
-    right: /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center gap-2"
-    }, /*#__PURE__*/React.createElement(Button, {
+    right: /*#__PURE__*/React.createElement(Button, {
       variant: "outline",
       size: "sm",
-      onClick: downloadMemberInputsTemplate
-    }, /*#__PURE__*/React.createElement(Icon, {
-      name: "download",
-      size: 12
-    }), "Template"), /*#__PURE__*/React.createElement(Button, {
-      variant: "outline",
-      size: "sm",
-      onClick: () => memberBulkFileRef.current?.click()
+      onClick: () => setShowResultUploadModal(true)
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "upload",
       size: 12
-    }), "Result Bulk Upload"), /*#__PURE__*/React.createElement("input", {
-      ref: memberBulkFileRef,
-      type: "file",
-      accept: ".xlsx,.xls,.csv",
-      style: {
-        display: "none"
-      },
-      onChange: e => {
-        if (e.target.files[0]) handleMemberInputsBulkFile(e.target.files[0]);
-        e.target.value = "";
-      }
-    }))
+    }), "Upload Results (Excel)")
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: {
@@ -1728,7 +1752,14 @@ function AddTestTab({
     onClick: handleCancelEdit
   }, "Cancel"), /*#__PURE__*/React.createElement(Button, {
     onClick: handleSave
-  }, editingRecord ? "Update Test Record" : "Save Test Record")));
+  }, editingRecord ? "Update Test Record" : "Save Test Record")), showResultUploadModal && buildUploadPseudoRecord() && /*#__PURE__*/React.createElement(RecordBulkUploadModal, {
+    record: buildUploadPseudoRecord(),
+    testType: selectedTest,
+    samples: samples,
+    onApply: applyPreSaveResultUpload,
+    onClose: () => setShowResultUploadModal(false),
+    notify: notify
+  }));
 }
 // ============================================================================
 // BULK RESULT UPLOAD — for the common real-world case: testing already
@@ -1981,7 +2012,6 @@ function TestRecordsTab({
   onEditRecord
 }) {
   const [deleteRecord, setDeleteRecord] = useState(null);
-  const [bulkUploadRecord, setBulkUploadRecord] = useState(null);
   // Resolves the Reference behind a record — via its single sample, or (for
   // an Analytical Batch record) its first member sample. Used for the
   // structured Batch Identifier badge (4.1).
@@ -1997,49 +2027,6 @@ function TestRecordsTab({
     ...prev,
     [id]: !prev[id]
   }));
-  function applyBulkResults(updatedMembers) {
-    const record = bulkUploadRecord;
-    setTestRecords(prev => prev.map(r => {
-      if (r.id !== record.id) return r;
-      if (r.memberResults && r.memberResults.length) return {
-        ...r,
-        memberResults: updatedMembers
-      };
-      // single-sample shape: updatedMembers has exactly one entry
-      return {
-        ...r,
-        results: updatedMembers[0]?.results || r.results
-      };
-    }));
-    // This bulk-fill path was bypassing the normal save flow entirely — a
-    // sample whose result got filled in here never got its
-    // requestedTests[].status moved to results_entered, so Sample Detail
-    // kept showing Pending/In Progress even though the value was right
-    // there in the record. Same setRequestedTestStatus() used everywhere
-    // else, so the rollup and Sub-Batch review queue stay consistent too.
-    if (setSamples) {
-      const actingUser = session || {
-        name: "System",
-        role: "Technician"
-      };
-      let advancedCount = 0;
-      updatedMembers.forEach(m => {
-        const hasValue = (m.results || []).some(res => res.value != null);
-        if (!hasValue) return;
-        const sample = (samples || []).find(s => s.id === m.sampleId);
-        if (!sample) return;
-        const rt = (sample.requestedTests || []).find(x => x.testTypeId === record.testTypeId);
-        if (!rt || rt.status !== "pending" && rt.status !== "in_progress") return; // already results_entered or further along — don't move it backward or re-log
-        const updated = setRequestedTestStatus(sample, record.testTypeId, "results_entered", actingUser, "Result filled in via bulk upload.");
-        setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
-        advancedCount++;
-      });
-      notify?.(`Updated results for ${updatedMembers.length} sample(s) on this record.${advancedCount ? ` ${advancedCount} sample(s) marked Result Entered.` : ""}`, "ok");
-    } else {
-      notify?.(`Updated results for ${updatedMembers.length} sample(s) on this record.`, "ok");
-    }
-    setBulkUploadRecord(null);
-  }
   const PAGE_SIZE = 10;
   function doDelete(rec) {
     setChemicals(prev => markExpiredBatches(restoreConsumption(prev, rec.bottleLog || {})));
@@ -2258,12 +2245,7 @@ function TestRecordsTab({
         className: "flex items-center justify-between flex-wrap gap-2 mb-1"
       }, /*#__PURE__*/React.createElement("span", {
         style: { color: C.muted }
-      }, `Samples in this Analytical Batch (${r.memberResults.length})`), /*#__PURE__*/React.createElement(IconButton, {
-        name: "upload",
-        color: C.teal,
-        title: "Bulk upload / correct results for this record's sample(s) from Excel",
-        onClick: () => setBulkUploadRecord(r)
-      }));
+      }, `Samples in this Analytical Batch (${r.memberResults.length})`));
 
       // Union of every result-parameter name across all members, in first-seen
       // order — so the table has consistent columns even if some samples'
@@ -2497,12 +2479,5 @@ function TestRecordsTab({
     totalItems: filtered.length,
     pageSize: PAGE_SIZE,
     onPageChange: setPage
-  })), bulkUploadRecord && /*#__PURE__*/React.createElement(RecordBulkUploadModal, {
-    record: bulkUploadRecord,
-    testType: testTypes?.find(t => t.id === bulkUploadRecord.testTypeId),
-    samples: samples,
-    onApply: applyBulkResults,
-    onClose: () => setBulkUploadRecord(null),
-    notify: notify
-  }));
+  })));
 }
