@@ -145,7 +145,8 @@ function ReferencePicker({
     style: { background: C.warnBg, color: C.warn }
   }, newErr), /*#__PURE__*/React.createElement(ClientPartFields, {
     form: newForm,
-    setForm: setNewForm
+    setForm: setNewForm,
+    references: references
   }), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end gap-2 mt-3"
   }, /*#__PURE__*/React.createElement(Button, {
@@ -236,12 +237,12 @@ const CLIENT_PART_EMPTY = {
   trackingNo: "",
   organizationName: "",
   contactPerson: "",
-  contactPhone: "",
-  notes: ""
+  contactPhone: ""
 };
 function ClientPartFields({
   form,
-  setForm
+  setForm,
+  references
 }) {
   function set(field, value) {
     setForm(prev => ({
@@ -301,12 +302,28 @@ function ClientPartFields({
     label: "Date",
     value: form.letterDate,
     onChange: v => set("letterDate", v)
-  }), /*#__PURE__*/React.createElement(TextField, {
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col gap-1"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-end gap-1.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex-1"
+  }, /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Tracking No. — required, must be unique",
     value: form.trackingNo,
     onChange: v => set("trackingNo", v)
-  }), /*#__PURE__*/React.createElement(TextField, {
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    title: "Auto-generate a Tracking No.",
+    onClick: () => set("trackingNo", generateTrackingNo(references, form.letterDate)),
+    className: "px-2.5 py-1.5 rounded text-xs font-medium border whitespace-nowrap",
+    style: {
+      borderColor: C.border,
+      color: C.ink,
+      background: C.card
+    }
+  }, "Generate"))), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Organization Name",
     value: form.organizationName,
@@ -321,13 +338,7 @@ function ClientPartFields({
     label: "Client Contact No.",
     value: form.contactPhone,
     onChange: v => set("contactPhone", v)
-  })), /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    textarea: true,
-    label: "Notes",
-    value: form.notes,
-    onChange: v => set("notes", v)
-  }));
+  })));
 }
 // Validates the Client Part form + actually creates the Reference. Shared
 // by the registration form and the bulk-upload popup so the Tracking No.
@@ -378,8 +389,7 @@ function SampleRegistrationForm({
     collectedBy: "",
     receivedDate: todayStr(),
     priority: "Routine",
-    numberOfSamples: 1,
-    notes: ""
+    numberOfSamples: 1
   });
   const [selectedTests, setSelectedTests] = React.useState([]);
   const [err, setErr] = React.useState("");
@@ -553,18 +563,7 @@ function SampleRegistrationForm({
     style: {
       color: C.muted
     }
-  }, "No test methods configured yet — add one in Test Method Engine first."))), /*#__PURE__*/React.createElement("div", {
-    className: "mt-3"
-  }, /*#__PURE__*/React.createElement(TextField, {
-    simple: true,
-    label: "Notes",
-    value: form.notes,
-    onChange: v => setForm({
-      ...form,
-      notes: v
-    }),
-    textarea: true
-  })), err && /*#__PURE__*/React.createElement("div", {
+  }, "No test methods configured yet — add one in Test Method Engine first."))), err && /*#__PURE__*/React.createElement("div", {
     className: "mt-2 text-xs font-medium",
     style: {
       color: C.warn
@@ -758,8 +757,7 @@ function SampleDetail({
       collectionDate: sample.collectionDate,
       collectedBy: sample.collectedBy,
       receivedDate: sample.receivedDate,
-      priority: sample.priority,
-      notes: sample.notes
+      priority: sample.priority
     });
     setEditing(true);
   }
@@ -816,9 +814,9 @@ function SampleDetail({
   })), /*#__PURE__*/React.createElement("div", {
     className: "grid gap-2",
     style: {
-      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))"
+      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))"
     }
-  }, [["clientName", "Customer Name"], ["siteLocation", "Site / Location"], ["district", "District"], ["upazila", "Upazila / City Corp"], ["union", "Union / Pourashava"], ["village", "Site Name"], ["fatherHusbandName", "Father's / Husband's Name"], ["latitude", "Latitude"], ["longitude", "Longitude"], ["waterPointTypeOther", "Type of Water Point - Other"], ["collectedBy", "Collected By"], ["notes", "Notes"]].map(([field, fieldLabel]) => /*#__PURE__*/React.createElement("label", {
+  }, [["clientName", "Customer Name"], ["siteLocation", "Site / Location"], ["district", "District"], ["upazila", "Upazila / City Corp"], ["union", "Union / Pourashava"], ["village", "Site Name"], ["fatherHusbandName", "Father's / Husband's Name"], ["latitude", "Latitude"], ["longitude", "Longitude"], ["waterPointTypeOther", "Type of Water Point - Other"], ["collectedBy", "Collected By"]].map(([field, fieldLabel]) => /*#__PURE__*/React.createElement("label", {
     key: field,
     className: "flex flex-col gap-0.5 text-xs",
     style: {
@@ -1449,7 +1447,8 @@ function BatchRegistrationForm({
     style: { color: C.ink }
   }, "Client Part"), /*#__PURE__*/React.createElement(ClientPartFields, {
     form: clientPart,
-    setForm: setClientPart
+    setForm: setClientPart,
+    references: references
   })), /*#__PURE__*/React.createElement("div", {
     className: "h-px",
     style: { background: C.border }
@@ -1620,7 +1619,8 @@ function ImportTestPickerModal({
     style: { background: C.bg, border: `1px solid ${C.border}` }
   }, /*#__PURE__*/React.createElement(ClientPartFields, {
     form: clientPart,
-    setForm: setClientPart
+    setForm: setClientPart,
+    references: references
   })), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-2",
     style: {
@@ -1703,7 +1703,7 @@ function SamplesTab({
   const filtered = samples.filter(s => {
     if (statusFilter && s.status !== statusFilter) return false;
     const ref = s.referenceId ? findReferenceById(references, s.referenceId) : null;
-    const haystack = `${s.sampleCode} ${s.clientName} ${s.siteLocation} ${ref?.trackingNo || ""} ${ref?.refNo || ""}`;
+    const haystack = `${s.sampleCode} ${s.clientName} ${s.siteLocation} ${ref?.trackingNo || ""} ${ref?.refNo || ""} ${ref?.contactPerson || ""}`;
     if (q && !haystack.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   }).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
@@ -1827,8 +1827,7 @@ function SamplesTab({
         receivedDate: String(readSampleImportField(row, "receivedDate") || todayStr()),
         priority: String(readSampleImportField(row, "priority") || "Routine").trim(),
         numberOfSamples: 1,
-        requestedTests,
-        notes: String(readSampleImportField(row, "notes")).trim()
+        requestedTests
       }, runningSamples, session);
       runningSamples = [...runningSamples, sample];
       await setSamples(prev => [...prev, sample], sample);
@@ -1968,6 +1967,7 @@ function SamplesTab({
   function renderSampleRow(s, indented) {
     const isNew = recentlyAddedIds.has(s.id);
     const overdue = isSampleOverdue(s);
+    const rowRef = s.referenceId ? findReferenceById(references, s.referenceId) : null;
     return /*#__PURE__*/React.createElement("tr", {
       key: s.id,
       id: `sample-row-${s.id}`,
@@ -1993,8 +1993,21 @@ function SamplesTab({
         color: "#fff"
       }
     }, "New"))), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2"
-    }, renderBatchTag(s)), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2",
+      style: {
+        color: C.muted
+      }
+    }, rowRef?.refNo || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2",
+      style: {
+        color: C.muted
+      }
+    }, rowRef?.trackingNo || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2",
+      style: {
+        color: C.ink
+      }
+    }, rowRef?.contactPerson || "—"), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-2",
       style: {
         color: C.ink
@@ -2009,7 +2022,7 @@ function SamplesTab({
       style: {
         color: C.muted
       }
-    }, s.matrix), /*#__PURE__*/React.createElement("td", {
+    }, s.waterPointType || "—"), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-2"
     }, /*#__PURE__*/React.createElement(PriorityBadge, {
       priority: s.priority
@@ -2197,7 +2210,7 @@ function SamplesTab({
     style: {
       background: C.bg
     }
-  }, ["Sample Code", "Batch / Memo Ref", "Client", "Site", "Sample Type", "Priority", "Status", "Assigned To", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Sample Code", "Ref / Memo No.", "Tracking No.", "Client", "Customer Name", "Site", "Type of Water Point", "Priority", "Status", "Assigned To", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     className: "text-left px-3 py-2 text-xs font-semibold",
     style: {
@@ -2216,7 +2229,7 @@ function SamplesTab({
       },
       onClick: () => toggleBatchExpand(item.referenceId)
     }, /*#__PURE__*/React.createElement("td", {
-      colSpan: 9,
+      colSpan: 11,
       className: "px-3 py-2"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-2 flex-wrap"
@@ -2250,7 +2263,7 @@ function SamplesTab({
       members: item.members
     })))), isOpen && item.members.map(s => renderSampleRow(s, true)));
   }), (viewMode === "flat" ? !filtered.length : !listItems.length) && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 9,
+    colSpan: 11,
     className: "px-3 py-2"
   }, /*#__PURE__*/React.createElement(EmptyState, {
     icon: "clipboard",
@@ -2681,7 +2694,7 @@ function SubBatchBuilder({
       position: "sticky",
       top: 0
     }
-  }, ["", "Sample Code", "Client", "Reference"].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["", "Sample Code", "Ref / Memo No.", "Tracking No.", "Client", "Customer Name", "Site", "Type of Water Point"].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     className: "text-left px-2 py-1.5 font-semibold",
     style: {
@@ -2715,12 +2728,32 @@ function SubBatchBuilder({
       style: {
         color: C.muted
       }
+    }, ref?.refNo || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: {
+        color: C.muted
+      }
+    }, ref?.trackingNo || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: {
+        color: C.ink
+      }
+    }, ref?.contactPerson || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: {
+        color: C.ink
+      }
     }, s.clientName), /*#__PURE__*/React.createElement("td", {
       className: "px-2 py-1.5",
       style: {
         color: C.muted
       }
-    }, ref ? referenceDisplayLabel(ref) : "—"));
+    }, s.siteLocation), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5",
+      style: {
+        color: C.muted
+      }
+    }, s.waterPointType || "—"));
   })))));
 
   const mixedBatchWarning = distinctReferences.length > 1 ? /*#__PURE__*/React.createElement("div", {

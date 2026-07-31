@@ -513,10 +513,6 @@ const SAMPLE_IMPORT_COLUMNS = [{
   key: "priority",
   header: "Priority",
   aliases: []
-}, {
-  key: "notes",
-  header: "Notes",
-  aliases: []
 }];
 // Looks up a field's value from a parsed Excel row, trying the canonical header first,
 // then every accepted alias — so old manifests and the current template both work.
@@ -528,6 +524,16 @@ function readSampleImportField(row, colKey) {
     if (row[alias] !== undefined && row[alias] !== "") return row[alias];
   }
   return "";
+}
+
+// ---------------- Batch identifier header (4.1) ----------------
+// Combined badge/summary string shown on test record list items and batch
+// headers so a batch is identifiable at a glance without opening it:
+//   [Date] | [Test Name] | [Ref / Memo No.] | [Tracking No.]
+// Any missing piece falls back to "—" rather than collapsing the format.
+function formatBatchIdentifier(date, testName, refNo, trackingNo) {
+  const parts = [date || "—", testName || "—", refNo || "—", trackingNo || "—"];
+  return parts.join(" | ");
 }
 
 // ---------------- Storage error reporting ----------------

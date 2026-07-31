@@ -140,7 +140,7 @@ function ParamGroupCard({ title, subtitle, group, testRecords, testTypes, refere
 // entry still happens in Add Test Record (13-testrecords-ui.js) — this
 // queue's job is to surface what's waiting and jump straight into it
 // preselected, not to reimplement the entry form. ----
-function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, goToTestEntry }) {
+function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, references, goToTestEntry }) {
   const pendingSubBatches = (subBatches || []).filter(sb => sb.status === "pending");
   const individualPendingCount = (samples || []).filter(s =>
     pendingTestTypeIdsForSample(s, testRecords, subBatches).length > 0
@@ -164,10 +164,24 @@ function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, goToT
                 E("div", { className: "text-[11px]", style: { color: C.muted } },
                   sb.testTypeName, " · ", (sb.memberSampleIds || []).length, " sample(s)",
                   sb.assignedTester ? ` · Assigned: ${sb.assignedTester}` : ""
-                )
+                ),
+                (() => {
+                  const firstSample = (samples || []).find(s => (sb.memberSampleIds || []).includes(s.id));
+                  const ref = firstSample?.referenceId ? findReferenceById(references, firstSample.referenceId) : null;
+                  return E("div", {
+                    className: "text-[11px] px-1.5 py-0.5 rounded font-mono mt-1 inline-block",
+                    style: { background: C.bg, color: C.muted },
+                    title: "Date | Test Name | Ref / Memo No. | Tracking No."
+                  }, formatBatchIdentifier(todayStr(), sb.testTypeName, ref?.refNo, ref?.trackingNo));
+                })()
               ),
-              E(Button, { size: "sm", onClick: () => goToTestEntry?.(sb.id) },
-                E(Icon, { name: "upload", size: 12 }), "Enter Results"
+              E("div", { className: "flex items-center gap-2" },
+                E(Button, { size: "sm", onClick: () => goToTestEntry?.(sb.id) },
+                  E(Icon, { name: "upload", size: 12 }), "Enter Individual Result"
+                ),
+                E(Button, { size: "sm", variant: "outline", onClick: () => goToTestEntry?.(sb.id) },
+                  E(Icon, { name: "download", size: 12 }), "Bulk Upload"
+                )
               )
             )
           ))
@@ -314,7 +328,7 @@ function ResultsWorkflowTab({
 }) {
   const perms = permissionsFor(session.role);
   const stageDefs = [
-    { k: "upload", label: "Pending Upload", icon: "upload", show: !!perms.canEnterResults },
+    { k: "upload", label: "Upload Results", icon: "upload", show: !!perms.canEnterResults },
     { k: "review", label: "Awaiting Review", icon: "search", show: !!perms.canReview },
     { k: "approve", label: "Awaiting Approval", icon: "check", show: !!perms.canApprove },
     { k: "release", label: "Approved — Release", icon: "printer", show: !!perms.canRelease }
@@ -351,7 +365,7 @@ function ResultsWorkflowTab({
         }
       }, E(Icon, { name: s.icon, size: 14 }), s.label)
     )),
-    active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, goToTestEntry }),
+    active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, references, goToTestEntry }),
     active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }),
     active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }),
     active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample })

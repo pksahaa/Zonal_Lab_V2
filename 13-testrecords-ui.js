@@ -33,6 +33,7 @@ function AddTestTab({
   const [selectedSubBatchId, setSelectedSubBatchId] = useState("");
   // Submit-guard for handleSave — see the try/finally wrapper below.
   const savingRef = React.useRef(false);
+  const memberBulkFileRef = React.useRef(null);
   // How the technician is choosing what to record results for — a clear
   // 3-way choice instead of two dropdowns shown side by side with "OR".
   const [selectionMode, setSelectionMode] = useState("individual"); // "individual" | "batch" | "subbatch"
@@ -199,6 +200,52 @@ function AddTestTab({
       ...res,
       value: +res.value.toFixed(param.roundTo ?? 2)
     } : res;
+  }
+  // ---- Result Bulk Upload for the calculated-results grid (3.2) — lets a
+  // tester fill in an Excel sheet with raw readings for every sample in the
+  // Analytical Batch instead of typing each one into the table below. One
+  // column per parameter input (SampleCode + "<Param> - <input label>"),
+  // matched back onto memberInputs by Sample Code on import. ----
+  function downloadMemberInputsTemplate() {
+    if (!selectedSubBatch || !resultParameters.length) return;
+    const inputCols = [];
+    resultParameters.forEach(p => p.inputs.forEach(inp => inputCols.push({
+      header: `${p.name} - ${inp.label || inp.key}`,
+      paramId: p.id,
+      key: inp.key
+    })));
+    const headers = ["SampleCode", ...inputCols.map(c => c.header)];
+    const rows = selectedSubBatch.memberSampleIds.map(sampleId => {
+      const sample = (samples || []).find(s => s.id === sampleId);
+      return [sample?.sampleCode || sampleId, ...inputCols.map(c => memberInputs[sampleId]?.[c.paramId]?.[c.key] ?? "")];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    XLSX.writeFile(wb, `${(selectedTest?.name || "test").replace(/[^a-z0-9]+/gi, "_")}_${selectedSubBatch.label || "batch"}_readings.xlsx`);
+  }
+  function handleMemberInputsBulkFile(file) {
+    if (!selectedSubBatch || !resultParameters.length) return;
+    readWorkbook(file, (err, rows) => {
+      if (err) return notify?.("Could not read Excel file", "warn");
+      const byCode = {};
+      selectedSubBatch.memberSampleIds.forEach(sampleId => {
+        const sample = (samples || []).find(s => s.id === sampleId);
+        if (sample?.sampleCode) byCode[sample.sampleCode] = sampleId;
+      });
+      let matched = 0;
+      rows.forEach(row => {
+        const sampleId = byCode[String(row.SampleCode || "").trim()];
+        if (!sampleId) return;
+        matched++;
+        resultParameters.forEach(p => p.inputs.forEach(inp => {
+          const header = `${p.name} - ${inp.label || inp.key}`;
+          const val = row[header];
+          if (val !== undefined && val !== "") setMemberInput(sampleId, p.id, inp.key, val);
+        }));
+      });
+      notify?.(`Bulk-filled readings for ${matched} of ${selectedSubBatch.memberSampleIds.length} sample(s). Click "Save Test Record" below to save them.`, matched ? "ok" : "warn");
+    });
   }
   function setMemberInput(sampleId, paramId, key, val) {
     setMemberInputs(prev => ({
@@ -1430,7 +1477,35 @@ function AddTestTab({
       name: "chart",
       size: 16,
       color: C.teal
-    })
+    }),
+    right: /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-2"
+    }, /*#__PURE__*/React.createElement(Button, {
+      variant: "outline",
+      size: "sm",
+      onClick: downloadMemberInputsTemplate
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "download",
+      size: 12
+    }), "Template"), /*#__PURE__*/React.createElement(Button, {
+      variant: "outline",
+      size: "sm",
+      onClick: () => memberBulkFileRef.current?.click()
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "upload",
+      size: 12
+    }), "Result Bulk Upload"), /*#__PURE__*/React.createElement("input", {
+      ref: memberBulkFileRef,
+      type: "file",
+      accept: ".xlsx,.xls,.csv",
+      style: {
+        display: "none"
+      },
+      onChange: e => {
+        if (e.target.files[0]) handleMemberInputsBulkFile(e.target.files[0]);
+        e.target.value = "";
+      }
+    }))
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: {
@@ -1838,6 +1913,14 @@ function TestRecordsTab({
 }) {
   const [deleteRecord, setDeleteRecord] = useState(null);
   const [bulkUploadRecord, setBulkUploadRecord] = useState(null);
+  // Resolves the Reference behind a record — via its single sample, or (for
+  // an Analytical Batch record) its first member sample. Used for the
+  // structured Batch Identifier badge (4.1).
+  function referenceForRecord(r) {
+    const sampleId = r.sampleId || (r.memberSampleIds && r.memberSampleIds[0]);
+    const sample = sampleId ? (samples || []).find(s => s.id === sampleId) : null;
+    return sample?.referenceId ? findReferenceById(references, sample.referenceId) : null;
+  }
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState({});
@@ -2006,7 +2089,14 @@ function TestRecordsTab({
       style: {
         color: C.ink
       }
-    }, r.testTypeName), (() => {
+    }, r.testTypeName), /*#__PURE__*/React.createElement("span", {
+      className: "text-[11px] px-1.5 py-0.5 rounded font-mono",
+      style: {
+        background: C.bg,
+        color: C.muted
+      },
+      title: "Date | Test Name | Ref / Memo No. | Tracking No."
+    }, formatBatchIdentifier(r.date, r.testTypeName, referenceForRecord(r)?.refNo, referenceForRecord(r)?.trackingNo)), (() => {
       // Which unit does this record actually cover — a Sub-Batch (many
       // samples, one parameter) or one Individual Sample? Previously the
       // row only showed the test name + date, with no way to tell.
@@ -2051,11 +2141,6 @@ function TestRecordsTab({
       className: "flex items-center gap-1 ml-auto",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement(IconButton, {
-      name: "upload",
-      color: C.teal,
-      title: "Bulk upload results for this record's sample(s) from Excel",
-      onClick: () => setBulkUploadRecord(r)
-    }), /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
       color: C.teal,
       title: "Edit full test record",
@@ -2101,9 +2186,15 @@ function TestRecordsTab({
       const sb = r.subBatchId ? (subBatches || []).find(x => x.id === r.subBatchId) : null;
 
       const headerLine = /*#__PURE__*/React.createElement("div", {
-        style: { color: C.muted },
-        className: "mb-1"
-      }, `Samples in this Analytical Batch (${r.memberResults.length})`);
+        className: "flex items-center justify-between flex-wrap gap-2 mb-1"
+      }, /*#__PURE__*/React.createElement("span", {
+        style: { color: C.muted }
+      }, `Samples in this Analytical Batch (${r.memberResults.length})`), /*#__PURE__*/React.createElement(IconButton, {
+        name: "upload",
+        color: C.teal,
+        title: "Bulk upload / correct results for this record's sample(s) from Excel",
+        onClick: () => setBulkUploadRecord(r)
+      }));
 
       // Union of every result-parameter name across all members, in first-seen
       // order — so the table has consistent columns even if some samples'

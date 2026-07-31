@@ -270,7 +270,6 @@ function createSample(fields, existingSamples, user) {
     // (see rollupSampleStatus()).
     numberOfSamples: Number(fields.numberOfSamples) > 0 ? Number(fields.numberOfSamples) : 1,
     // batch size — how many physical field samples this registration covers
-    notes: fields.notes || "",
     status: "registered",
     preHoldStatus: null,
     assignedTo: "",
@@ -342,7 +341,7 @@ function transitionSample(sample, newStatus, meta, user) {
 // only the registration fields are editable, never status/results/custody
 // history itself; every edit is logged as its own custody event so the
 // correction is auditable rather than silently overwritten.
-const SAMPLE_EDITABLE_FIELDS = ["clientName", "siteLocation", "district", "upazila", "union", "village", "caretakerName", "fatherHusbandName", "latitude", "longitude", "waterPointType", "waterPointTypeOther", "sampleSourceId", "batchRef", "referenceId", "matrix", "collectionDate", "collectedBy", "receivedDate", "priority", "numberOfSamples", "requestedTests", "notes"];
+const SAMPLE_EDITABLE_FIELDS = ["clientName", "siteLocation", "district", "upazila", "union", "village", "caretakerName", "fatherHusbandName", "latitude", "longitude", "waterPointType", "waterPointTypeOther", "sampleSourceId", "batchRef", "referenceId", "matrix", "collectionDate", "collectedBy", "receivedDate", "priority", "numberOfSamples", "requestedTests"];
 function editSample(sample, patch, user) {
   const changes = [];
   const cleanPatch = {};
