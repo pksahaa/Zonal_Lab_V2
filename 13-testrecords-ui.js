@@ -600,7 +600,8 @@ function AddTestTab({
           const raw = memberInputs[sampleId]?.[p.id]?.[inp.key];
           return raw !== undefined && raw !== "" && raw !== null;
         }));
-        return hasAnyRawInput ? null : sample?.sampleCode || sampleId;
+        const hasAnyOverride = (resultOverridesBySample[sampleId] || []).some(r => r.value != null);
+        return hasAnyRawInput || hasAnyOverride ? null : sample?.sampleCode || sampleId;
       }).filter(Boolean);
       if (emptyMembers.length) {
         notify(`${emptyMembers.length} sample(s) have no readings entered yet — fix before saving: ${emptyMembers.slice(0, 6).join(", ")}${emptyMembers.length > 6 ? "…" : ""}. If this came from a bulk upload, re-check the column headers against the downloaded template.`, "warn");
