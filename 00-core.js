@@ -494,9 +494,9 @@ const SAMPLE_IMPORT_COLUMNS = [{
   header: "Type of Water Point - Other",
   aliases: ["WaterPointTypeOther"]
 }, {
-  key: "matrix",
-  header: "Matrix",
-  aliases: []
+  key: "sampleType",
+  header: "Sample Type",
+  aliases: ["Matrix", "SampleType"]
 }, {
   key: "collectionDate",
   header: "CollectionDate",

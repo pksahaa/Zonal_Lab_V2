@@ -244,13 +244,39 @@ function ClientPartFields({
   setForm,
   references
 }) {
+  // Tracking No. is required + must be unique across Client entries. These
+  // two bits of local UI state drive the inline red-asterisk/red-border
+  // validation below and the "must be unique" popup modal, without
+  // affecting the shared submit-time validation in submitClientPart()
+  // (which still runs, and still wins, when the form is actually submitted).
+  const [trackingTouched, setTrackingTouched] = React.useState(false);
+  const [showDupModal, setShowDupModal] = React.useState(false);
   function set(field, value) {
     setForm(prev => ({
       ...prev,
       [field]: value
     }));
   }
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  const trackingNoTrimmed = (form.trackingNo || "").trim();
+  const isDuplicateTrackingNo = !!trackingNoTrimmed && isTrackingNoTaken(form.trackingNo, references);
+  const trackingNoError = trackingTouched && !trackingNoTrimmed ? "Tracking No. is required." : isDuplicateTrackingNo ? `Tracking No. "${trackingNoTrimmed}" is already used by another Client entry — it must be unique.` : "";
+  function checkTrackingNoOnBlur() {
+    setTrackingTouched(true);
+    if (trackingNoTrimmed && isTrackingNoTaken(form.trackingNo, references)) {
+      setShowDupModal(true);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", null, showDupModal && /*#__PURE__*/React.createElement(Modal, {
+    title: "Tracking No. must be unique",
+    onClose: () => setShowDupModal(false)
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-sm",
+    style: { color: C.ink }
+  }, `Tracking No. "${trackingNoTrimmed}" is already used by another Client entry. Please enter a different Tracking No., or use "Generate" to create a new unique one.`), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end mt-3"
+  }, /*#__PURE__*/React.createElement(Button, {
+    onClick: () => setShowDupModal(false)
+  }, "OK"))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-semibold mb-1.5",
     style: {
       color: C.ink
@@ -303,32 +329,51 @@ function ClientPartFields({
     value: form.letterDate,
     onChange: v => set("letterDate", v)
   }), /*#__PURE__*/React.createElement("div", {
-    className: "flex flex-col gap-1"
+    className: "flex flex-col gap-1",
+    style: {
+      gridColumn: "span 2",
+      minWidth: 0
+    }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-end gap-1.5"
+    className: "flex items-end gap-1.5 flex-wrap"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1"
+    className: "flex-1",
+    style: {
+      minWidth: 160
+    }
   }, /*#__PURE__*/React.createElement(TextField, {
     simple: true,
-    label: "Tracking No. — required, must be unique",
+    label: /*#__PURE__*/React.createElement(React.Fragment, null, "Tracking No. ", /*#__PURE__*/React.createElement("span", {
+      style: { color: C.warn }
+    }, "*")),
     value: form.trackingNo,
-    onChange: v => set("trackingNo", v)
+    onChange: v => set("trackingNo", v),
+    onBlur: checkTrackingNoOnBlur,
+    error: trackingNoError
   })), /*#__PURE__*/React.createElement("button", {
     type: "button",
     title: "Auto-generate a Tracking No.",
-    onClick: () => set("trackingNo", generateTrackingNo(references, form.letterDate)),
-    className: "px-2.5 py-1.5 rounded text-xs font-medium border whitespace-nowrap",
+    onClick: () => {
+      set("trackingNo", generateTrackingNo(references, form.letterDate));
+      setTrackingTouched(false);
+    },
+    className: "px-2.5 py-1.5 rounded text-xs font-medium border whitespace-nowrap shrink-0",
     style: {
       borderColor: C.border,
       color: C.ink,
       background: C.card
     }
-  }, "Generate"))), /*#__PURE__*/React.createElement(TextField, {
+  }, "Generate")), !trackingNoError && /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px]",
+    style: { color: C.muted }
+  }, "Must be unique.")), /*#__PURE__*/React.createElement("div", {
+    style: { minWidth: 0 }
+  }, /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Organization Name",
     value: form.organizationName,
     onChange: v => set("organizationName", v)
-  }), /*#__PURE__*/React.createElement(TextField, {
+  })), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Client Name",
     value: form.contactPerson,
@@ -384,7 +429,7 @@ function SampleRegistrationForm({
     village: "",
     caretakerName: "",
     sampleSourceId: "",
-    matrix: "Drinking Water",
+    sampleType: "Drinking Water",
     collectionDate: todayStr(),
     collectedBy: "",
     receivedDate: todayStr(),
@@ -485,11 +530,11 @@ function SampleRegistrationForm({
     })
   }), /*#__PURE__*/React.createElement(SelectField, {
     simple: true,
-    label: "Matrix",
-    value: form.matrix,
+    label: "Sample Type",
+    value: form.sampleType,
     onChange: v => setForm({
       ...form,
-      matrix: v
+      sampleType: v
     }),
     options: ["Drinking Water", "Ground Water", "Surface Water", "Wastewater", "Other"]
   }), /*#__PURE__*/React.createElement(SelectField, {
@@ -753,7 +798,7 @@ function SampleDetail({
       waterPointTypeOther: sample.waterPointTypeOther,
       batchRef: sample.batchRef,
       referenceId: sample.referenceId,
-      matrix: sample.matrix,
+      sampleType: sample.sampleType,
       collectionDate: sample.collectionDate,
       collectedBy: sample.collectedBy,
       receivedDate: sample.receivedDate,
@@ -816,7 +861,7 @@ function SampleDetail({
     style: {
       gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))"
     }
-  }, [["clientName", "Customer Name"], ["siteLocation", "Site / Location"], ["district", "District"], ["upazila", "Upazila / City Corp"], ["union", "Union / Pourashava"], ["village", "Site Name"], ["fatherHusbandName", "Father's / Husband's Name"], ["latitude", "Latitude"], ["longitude", "Longitude"], ["waterPointTypeOther", "Type of Water Point - Other"], ["collectedBy", "Collected By"]].map(([field, fieldLabel]) => /*#__PURE__*/React.createElement("label", {
+  }, [["clientName", "Customer Name"], ["siteLocation", "Site / Location"], ["district", "District"], ["upazila", "Upazila / City Corp"], ["union", "Union / Pourashava"], ["village", "Site Name/Village"], ["fatherHusbandName", "Father's / Husband's Name"], ["latitude", "Latitude"], ["longitude", "Longitude"], ["waterPointTypeOther", "Type of Water Point - Other"], ["collectedBy", "Collected By"]].map(([field, fieldLabel]) => /*#__PURE__*/React.createElement("label", {
     key: field,
     className: "flex flex-col gap-0.5 text-xs",
     style: {
@@ -842,10 +887,10 @@ function SampleDetail({
     style: {
       borderColor: C.border
     },
-    value: editForm.matrix,
+    value: editForm.sampleType,
     onChange: e => setEditForm(prev => ({
       ...prev,
-      matrix: e.target.value
+      sampleType: e.target.value
     }))
   }, ["Drinking Water", "Ground Water", "Surface Water", "Wastewater", "Other"].map(m => /*#__PURE__*/React.createElement("option", {
     key: m,
@@ -964,7 +1009,7 @@ function SampleDetail({
     style: {
       color: C.muted
     }
-  }, sample.matrix, " · ", sample.siteLocation, " · ", sample.numberOfSamples || 1, " sample", (sample.numberOfSamples || 1) > 1 ? "s" : "", " in batch"), /*#__PURE__*/React.createElement("div", {
+  }, sample.sampleType, " · ", sample.siteLocation, " · ", sample.numberOfSamples || 1, " sample", (sample.numberOfSamples || 1) > 1 ? "s" : "", " in batch"), /*#__PURE__*/React.createElement("div", {
     className: "ml-auto flex items-center gap-1"
   }, canEdit && /*#__PURE__*/React.createElement(IconButton, {
     name: "edit",
@@ -1252,7 +1297,7 @@ function SampleEntryCard({ index, row, updateRow, onDuplicate, onRemove, canRemo
     onChange: v => updateRow("fatherHusbandName", v)
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
-    label: "Site Name",
+    label: "Site Name/Village",
     value: row.village,
     onChange: v => updateRow("village", v)
   }), /*#__PURE__*/React.createElement(TextField, {
@@ -1325,7 +1370,7 @@ function BatchRegistrationForm({
   const [step, setStep] = React.useState(1);
   const [step1Confirmed, setStep1Confirmed] = React.useState(false);
   const [shared, setShared] = React.useState({
-    matrix: "Drinking Water",
+    sampleType: "Drinking Water",
     collectionDate: todayStr(),
     collectedBy: "",
     receivedDate: todayStr(),
@@ -1384,7 +1429,7 @@ function BatchRegistrationForm({
   async function submit() {
     if (saving) return;
     if (rows.every(r => !r.customerName.trim() && !r.village.trim())) {
-      setErr("Fill in at least one sample row (Customer Name or Site Name).");
+      setErr("Fill in at least one sample row (Customer Name or Site Name/Village).");
       return;
     }
     const validRows = rows.filter(r => r.customerName.trim() || r.village.trim());
@@ -1461,8 +1506,8 @@ function BatchRegistrationForm({
   }, /*#__PURE__*/React.createElement(SelectField, {
     simple: true,
     label: "Sample Type",
-    value: shared.matrix,
-    onChange: v => setShared({ ...shared, matrix: v }),
+    value: shared.sampleType,
+    onChange: v => setShared({ ...shared, sampleType: v }),
     options: ["Drinking Water", "Surface Water", "Wastewater", "Groundwater", "Other"].map(m => ({ value: m, label: m }))
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
@@ -1821,7 +1866,7 @@ function SamplesTab({
         waterPointTypeOther: String(readSampleImportField(row, "waterPointTypeOther")).trim(),
         referenceId: ref ? ref.id : "",
         batchRef: ref ? ref.refNo : "",
-        matrix: String(readSampleImportField(row, "matrix") || "Drinking Water").trim(),
+        sampleType: String(readSampleImportField(row, "sampleType") || "Drinking Water").trim(),
         collectionDate: String(readSampleImportField(row, "collectionDate") || todayStr()),
         collectedBy: String(readSampleImportField(row, "collectedBy")).trim(),
         receivedDate: String(readSampleImportField(row, "receivedDate") || todayStr()),
@@ -1968,6 +2013,7 @@ function SamplesTab({
     const isNew = recentlyAddedIds.has(s.id);
     const overdue = isSampleOverdue(s);
     const rowRef = s.referenceId ? findReferenceById(references, s.referenceId) : null;
+    const latLong = s.latitude || s.longitude ? `${s.latitude || "—"} / ${s.longitude || "—"}` : "—";
     return /*#__PURE__*/React.createElement("tr", {
       key: s.id,
       id: `sample-row-${s.id}`,
@@ -1979,10 +2025,10 @@ function SamplesTab({
       },
       onClick: () => setOpenId(s.id)
     }, /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2 font-medium",
+      className: "px-2 py-1.5 font-medium whitespace-nowrap",
       style: {
         color: C.ink,
-        paddingLeft: indented ? 28 : undefined
+        paddingLeft: indented ? 24 : undefined
       }
     }, /*#__PURE__*/React.createElement("span", {
       className: "inline-flex items-center gap-1.5"
@@ -1993,41 +2039,66 @@ function SamplesTab({
         color: "#fff"
       }
     }, "New"))), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.muted
       }
     }, rowRef?.refNo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.muted
       }
     }, rowRef?.trackingNo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.ink
       }
     }, rowRef?.contactPerson || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.ink
       }
     }, s.clientName), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.muted
       }
     }, s.siteLocation), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
+      style: {
+        color: C.muted
+      }
+    }, s.district || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 whitespace-nowrap",
+      style: {
+        color: C.muted
+      }
+    }, s.upazila || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 whitespace-nowrap",
+      style: {
+        color: C.muted
+      }
+    }, s.union || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 whitespace-nowrap",
+      style: {
+        color: C.muted
+      }
+    }, s.sampleType || "—"), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 whitespace-nowrap",
+      style: {
+        color: C.muted
+      }
+    }, latLong), /*#__PURE__*/React.createElement("td", {
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.muted
       }
     }, s.waterPointType || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2"
+      className: "px-2 py-1.5"
     }, /*#__PURE__*/React.createElement(PriorityBadge, {
       priority: s.priority
     })), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2"
+      className: "px-2 py-1.5"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-1 flex-wrap"
     }, /*#__PURE__*/React.createElement(SampleStatusBadge, {
@@ -2042,12 +2113,12 @@ function SamplesTab({
       name: "warning",
       size: 9
     }), "Overdue"))), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2",
+      className: "px-2 py-1.5 whitespace-nowrap",
       style: {
         color: C.muted
       }
     }, s.assignedTo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-2 text-right"
+      className: "px-2 py-1.5 text-right"
     }, renderRowActions(s)));
   }
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -2203,16 +2274,16 @@ function SamplesTab({
     },
     onClick: () => openMenuId && setOpenMenuId(null)
   }, /*#__PURE__*/React.createElement("div", {
-    className: "overflow-x-auto"
+    className: "overflow-x-auto table-scroll"
   }, /*#__PURE__*/React.createElement("table", {
-    className: "w-full text-sm"
+    className: "w-full text-[13px]"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     style: {
       background: C.bg
     }
-  }, ["Sample Code", "Ref / Memo No.", "Tracking No.", "Client", "Customer Name", "Site", "Type of Water Point", "Priority", "Status", "Assigned To", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Sample Code", "Ref / Memo No.", "Tracking No.", "Client", "Customer Name", "Site", "District", "City Corp./Pourosova/Upazilla", "Ward/Union", "Sample Type", "Latitude/Longitude", "Type of Water Point", "Priority", "Status", "Assigned To", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
-    className: "text-left px-3 py-2 text-xs font-semibold",
+    className: "text-left px-2 py-1.5 text-[11px] font-semibold whitespace-nowrap",
     style: {
       color: C.muted
     }
@@ -2229,7 +2300,7 @@ function SamplesTab({
       },
       onClick: () => toggleBatchExpand(item.referenceId)
     }, /*#__PURE__*/React.createElement("td", {
-      colSpan: 11,
+      colSpan: 16,
       className: "px-3 py-2"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-2 flex-wrap"
@@ -2263,7 +2334,7 @@ function SamplesTab({
       members: item.members
     })))), isOpen && item.members.map(s => renderSampleRow(s, true)));
   }), (viewMode === "flat" ? !filtered.length : !listItems.length) && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 11,
+    colSpan: 16,
     className: "px-3 py-2"
   }, /*#__PURE__*/React.createElement(EmptyState, {
     icon: "clipboard",
