@@ -224,6 +224,17 @@ function AddTestTab({
     XLSX.utils.book_append_sheet(wb, ws, "Results");
     XLSX.writeFile(wb, `${(selectedTest?.name || "test").replace(/[^a-z0-9]+/gi, "_")}_${selectedSubBatch.label || "batch"}_readings.xlsx`);
   }
+  // Normalizes a header string so trivial Excel-side differences (extra
+  // whitespace, case, curly vs straight quotes, en/em-dash vs hyphen from
+  // autocorrect) don't cause a silent, unreported column-match failure —
+  // this was the actual root cause of "batch shows up in Awaiting Review
+  // but result values are missing": SampleCode matched fine (single fixed
+  // key), so the success toast looked right, while every parameter column
+  // silently failed to match and got skipped, leaving null/blank results.
+  function normalizeHeader(s) {
+    return String(s || "").replace(/[\u2010-\u2015]/g, "-") // en/em dash, minus → hyphen
+    .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim().replace(/\s+/g, " ").toLowerCase();
+  }
   function handleMemberInputsBulkFile(file) {
     if (!selectedSubBatch || !resultParameters.length) return;
     readWorkbook(file, (err, rows) => {
@@ -231,20 +242,57 @@ function AddTestTab({
       const byCode = {};
       selectedSubBatch.memberSampleIds.forEach(sampleId => {
         const sample = (samples || []).find(s => s.id === sampleId);
-        if (sample?.sampleCode) byCode[sample.sampleCode] = sampleId;
+        if (sample?.sampleCode) byCode[normalizeHeader(sample.sampleCode)] = sampleId;
       });
-      let matched = 0;
+      // Expected column → {paramId, key, name} map, keyed by normalized header —
+      // built fresh from the current resultParameters so it can't drift out of
+      // sync with downloadMemberInputsTemplate().
+      const expectedCols = {};
+      resultParameters.forEach(p => p.inputs.forEach(inp => {
+        expectedCols[normalizeHeader(`${p.name} - ${inp.label || inp.key}`)] = {
+          paramId: p.id,
+          key: inp.key,
+          name: `${p.name} - ${inp.label || inp.key}`
+        };
+      }));
+      let matchedSamples = 0;
+      let filledValues = 0;
+      const unmatchedSampleCodes = [];
       rows.forEach(row => {
-        const sampleId = byCode[String(row.SampleCode || "").trim()];
-        if (!sampleId) return;
-        matched++;
-        resultParameters.forEach(p => p.inputs.forEach(inp => {
-          const header = `${p.name} - ${inp.label || inp.key}`;
-          const val = row[header];
-          if (val !== undefined && val !== "") setMemberInput(sampleId, p.id, inp.key, val);
-        }));
+        const rowKeys = Object.keys(row);
+        // Find the SampleCode-ish column regardless of exact header casing.
+        const codeKey = rowKeys.find(k => normalizeHeader(k) === "samplecode") || "SampleCode";
+        const codeVal = normalizeHeader(row[codeKey]);
+        const sampleId = byCode[codeVal];
+        if (!sampleId) {
+          if (codeVal) unmatchedSampleCodes.push(row[codeKey]);
+          return;
+        }
+        matchedSamples++;
+        rowKeys.forEach(k => {
+          if (k === codeKey) return;
+          const target = expectedCols[normalizeHeader(k)];
+          if (!target) return; // column doesn't correspond to any known parameter input — ignore, don't guess
+          const val = row[k];
+          if (val !== undefined && val !== "") {
+            setMemberInput(sampleId, target.paramId, target.key, val);
+            filledValues++;
+          }
+        });
       });
-      notify?.(`Bulk-filled readings for ${matched} of ${selectedSubBatch.memberSampleIds.length} sample(s). Click "Save Test Record" below to save them.`, matched ? "ok" : "warn");
+      const expectedValueCells = matchedSamples * Object.keys(expectedCols).length;
+      if (matchedSamples === 0) {
+        notify?.("No rows matched a Sample Code in this Analytical Batch — check the SampleCode column against the downloaded template.", "warn");
+      } else if (filledValues === 0) {
+        notify?.(`${matchedSamples} sample(s) matched by Sample Code, but 0 result values were read — the column headers don't match the expected parameter names. Re-download the template and paste your readings into it without renaming the header row.`, "warn");
+      } else if (filledValues < expectedValueCells) {
+        notify?.(`Bulk-filled ${filledValues} of ${expectedValueCells} expected value(s) across ${matchedSamples} sample(s). Some cells were blank or their column header didn't match — check before saving.`, "warn");
+      } else {
+        notify?.(`Bulk-filled readings for ${matchedSamples} of ${selectedSubBatch.memberSampleIds.length} sample(s). Click "Save Test Record" below to save them.`, "ok");
+      }
+      if (unmatchedSampleCodes.length) {
+        notify?.(`${unmatchedSampleCodes.length} row(s) had a Sample Code not in this Analytical Batch — ignored: ${unmatchedSampleCodes.slice(0, 5).join(", ")}${unmatchedSampleCodes.length > 5 ? "…" : ""}`, "warn");
+      }
     });
   }
   function setMemberInput(sampleId, paramId, key, val) {
@@ -530,6 +578,27 @@ function AddTestTab({
     if (!tester.trim()) return notify("Please enter tester name", "warn");
     if (numberOfStandardSamples === "" && numberOfFieldSamples === "") return notify("Please enter No. of Standard Samples and No. of Field Samples (use 0 if none).", "warn");
     if (dilutionRequired && numberOfDilutedSamples === "") return notify("Please enter No. of Samples Requiring Dilution (use 0 if none).", "warn");
+
+    // Analytical Batch (Sub-Batch) save: refuse to create a record where a
+    // member sample ends up with zero result values — this is what used to
+    // let a bulk-upload with mismatched Excel headers silently produce a
+    // "results_entered" sample with nothing actually in it (batch visible in
+    // Awaiting Review, value column blank). Catch it here, before the
+    // record/status changes happen, not after.
+    if (selectedSubBatch && resultParameters.length) {
+      const emptyMembers = selectedSubBatch.memberSampleIds.map(sampleId => {
+        const sample = (samples || []).find(s => s.id === sampleId);
+        const hasAnyRawInput = resultParameters.some(p => p.inputs.some(inp => {
+          const raw = memberInputs[sampleId]?.[p.id]?.[inp.key];
+          return raw !== undefined && raw !== "" && raw !== null;
+        }));
+        return hasAnyRawInput ? null : sample?.sampleCode || sampleId;
+      }).filter(Boolean);
+      if (emptyMembers.length) {
+        notify(`${emptyMembers.length} sample(s) have no readings entered yet — fix before saving: ${emptyMembers.slice(0, 6).join(", ")}${emptyMembers.length > 6 ? "…" : ""}. If this came from a bulk upload, re-check the column headers against the downloaded template.`, "warn");
+        return;
+      }
+    }
 
     // If editing an existing record, first restore its previous consumption so we validate against true available stock.
     let baseChemicals = chemicals;
