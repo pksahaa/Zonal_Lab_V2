@@ -66,7 +66,13 @@ function hasLimit(v) {
  * @param {object} parameterConfig - limits from the Parameter record:
  *   { lod, loq, minDetection, maxDetection, refLimitMin, refLimitMax }
  *   Any field may be "" / null / undefined if that limit isn't configured.
- * @param {boolean} isDiluted - whether dilution was applied for this record.
+ * @param {boolean} isDiluted - whether dilution was applied for the batch/
+ *   record this result belongs to. NOTE: this is a per-record flag, not a
+ *   per-sample one — a batch can be marked "Dilution Required" while only
+ *   some of its samples actually needed it. This function only honors the
+ *   flag for a given result if that result's own value exceeds
+ *   maxDetection; otherwise it evaluates the result as if isDiluted were
+ *   false, regardless of what the batch/record flag says.
  * @returns {{ remark: string, flag: string, displayValue: string|null, ruleId: string }}
  */
 function generateResultRemark(result, parameterConfig, isDiluted) {
@@ -92,7 +98,17 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
   const refLimitMax = hasLimit(cfg.refLimitMax) ? Number(cfg.refLimitMax) : null;
 
   // ==== 1. DILUTION HANDLING ====
-  if (isDiluted) {
+  // `isDiluted` is recorded once per test record/batch, not per sample —
+  // but in reality only the sample(s) whose result actually exceeded Max
+  // Detection needed dilution. So a batch-level dilution flag should NOT
+  // push every sample in that batch through the diluted pathway; only the
+  // sample(s) whose own result exceeds maxDetection go through it. Any
+  // other sample in the same "diluted" batch falls straight through to the
+  // normal (not-diluted) rules below, exactly as if isDiluted were false
+  // for it. If maxDetection isn't configured at all we have no way to tell
+  // which samples needed it, so we fall back to trusting the flag.
+  const dilutionAppliesToThisResult = isDiluted && (maxDetection === null || num > maxDetection);
+  if (dilutionAppliesToThisResult) {
     // maxDetection is intentionally ignored while diluted.
     if (refLimitMax !== null && num > refLimitMax) {
       return {
@@ -110,7 +126,8 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     };
   }
 
-  // ==== not diluted: raw result vs Max Detection Limit ====
+  // ==== not diluted (or diluted batch, but this sample didn't need it):
+  // raw result vs Max Detection Limit ====
   if (maxDetection !== null && num > maxDetection) {
     return {
       remark: "Exceeds Max Detection Limit! Re-test with Dilution.",
