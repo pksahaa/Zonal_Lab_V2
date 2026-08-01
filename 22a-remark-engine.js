@@ -356,8 +356,7 @@ function SystemRemarkCell({ evaluated, manualRemark, onManualRemarkChange, edita
     },
       evaluated.length > 1 && React.createElement("span", { className: "text-[11px] font-medium", style: { color: C.muted } }, `${ev.name}:`),
       React.createElement(SystemRemarkBadge, { flag: ev.flag, remark: ev.remark }),
-      ev.displayValue && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `(${ev.displayValue}${ev.unit ? ` ${ev.unit}` : ""})`),
-      ev.limitLabel && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `· ${ev.limitLabel}: ${ev.limitValue}${ev.unit ? ` ${ev.unit}` : ""}`)
+      ev.limitLabel && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `${ev.limitLabel}: ${ev.limitValue}${ev.unit ? ` ${ev.unit}` : ""}`)
     )),
     editable && (
       editing
