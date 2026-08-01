@@ -609,6 +609,53 @@ function AddTestTab({
       }
     }
 
+    // Individual (single-sample) save: the same "zero result values" bug
+    // above applies here too, and used to go unguarded — computeResult()
+    // defaults any not-yet-typed raw input to 0 (by design, so the live
+    // preview has something to show while a tester is still mid-entry), so
+    // a formula like "(A - B) * N / V" with V left blank doesn't fail
+    // obviously — it either silently computes 0-based nonsense or divides
+    // by zero and comes back as `value: null, error: ...`. Either way the
+    // record still saved, the sample still flipped to results_entered, and
+    // it showed up everywhere (Test Records, Awaiting Review, etc.) with a
+    // blank/zero result — indistinguishable from "didn't save" to the
+    // tester, unlike a bulk/Excel upload, which always carries an explicit
+    // value straight into resultOverridesBySample and can't be empty. Block
+    // it here instead, the same way the Sub-Batch path already does.
+    if (selectedSampleId && !selectedSubBatch && resultParameters.length) {
+      const incompleteParams = resultParameters.filter(p => {
+        const override = (resultOverridesBySample[selectedSampleId] || []).find(r => r.paramId === p.id);
+        if (override) return false; // explicit value from Upload Results (Excel) — fine as-is
+        if (!p.inputs.length) return false; // no raw inputs on this parameter — nothing to check
+        // Every input this parameter's formula needs must actually be filled in —
+        // a partially-filled parameter (e.g. reading A given, volume V left blank)
+        // is exactly what silently produces a defaulted-to-0 or divide-by-zero
+        // result today, so it's treated the same as fully empty.
+        return p.inputs.some(inp => {
+          const raw = resultInputs[p.id]?.[inp.key];
+          return raw === undefined || raw === "" || raw === null;
+        });
+      });
+      if (incompleteParams.length) {
+        notify(`Missing reading(s) for: ${incompleteParams.map(p => p.name).join(", ")} — fill in every input for each result parameter before saving (or use "Upload Results (Excel)").`, "warn");
+        return;
+      }
+      // All required inputs are present, but the formula itself can still
+      // fail (e.g. a divide-by-zero from a legitimately-entered 0) — catch
+      // that here too, rather than silently saving a `value: null` result
+      // that looks the same as "nothing entered" everywhere downstream.
+      const formulaErrors = resultParameters.map(p => {
+        const override = (resultOverridesBySample[selectedSampleId] || []).find(r => r.paramId === p.id);
+        if (override || !p.inputs.length) return null;
+        const res = computeResult(p);
+        return res.ok ? null : `${p.name}: ${res.error}`;
+      }).filter(Boolean);
+      if (formulaErrors.length) {
+        notify(`Can't save — result calculation failed: ${formulaErrors.join("; ")}. Fix the reading(s) and try again.`, "warn");
+        return;
+      }
+    }
+
     // If editing an existing record, first restore its previous consumption so we validate against true available stock.
     let baseChemicals = chemicals;
     if (editingRecord) baseChemicals = restoreConsumption(chemicals, editingRecord.bottleLog || {});
