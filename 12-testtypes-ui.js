@@ -598,15 +598,20 @@ function ParameterLinker({
   selectedIds,
   setSelectedIds
 }) {
+  // Single-select only: a Test Type reports exactly one Parameter. Picking a
+  // new one replaces whatever was selected before (radio behaviour, not
+  // checkboxes) — selectedIds is kept as a 0-or-1-length array so the rest of
+  // the app (isParameterUsed, exports, etc.) doesn't need to change shape.
   const [q, setQ] = useState("");
-  const selected = (selectedIds || []).map(id => parameters.find(p => p.id === id)).filter(Boolean);
+  const selectedId = (selectedIds || [])[0] || "";
+  const selected = parameters.find(p => p.id === selectedId) || null;
   const query = q.trim().toLowerCase();
   const filtered = parameters.filter(p => !query || [p.code, p.name, p.shortName].some(v => (v || "").toLowerCase().includes(query)));
-  function toggle(id) {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  function select(id) {
+    setSelectedIds(prev => (prev || [])[0] === id ? [] : [id]);
   }
-  function remove(id) {
-    setSelectedIds(prev => prev.filter(x => x !== id));
+  function remove() {
+    setSelectedIds([]);
   }
   if (parameters.length === 0) {
     return /*#__PURE__*/React.createElement("div", {
@@ -622,28 +627,28 @@ function ParameterLinker({
     className: "flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer",
     style: { borderTop: `1px solid ${C.border}` }
   }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: (selectedIds || []).includes(p.id),
-    onChange: () => toggle(p.id)
+    type: "radio",
+    name: "linked-parameter",
+    checked: selectedId === p.id,
+    onChange: () => select(p.id)
   }), /*#__PURE__*/React.createElement("span", {
     className: "font-semibold",
     style: { color: C.ink }
   }, p.code), /*#__PURE__*/React.createElement("span", {
     style: { color: C.muted }
-  }, "— ", p.name, p.unit ? ` (${p.unit})` : "")));
+  }, "— ", p.name, p.shortName ? ` (${p.shortName})` : "", p.unit ? ` (${p.unit})` : "")));
   return /*#__PURE__*/React.createElement("div", { className: "flex flex-col gap-2" },
-    selected.length > 0 && /*#__PURE__*/React.createElement("div", { className: "flex flex-wrap gap-1.5" },
-      selected.map(p => /*#__PURE__*/React.createElement("span", {
-        key: p.id,
+    selected && /*#__PURE__*/React.createElement("div", { className: "flex flex-wrap gap-1.5" },
+      /*#__PURE__*/React.createElement("span", {
         className: "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold",
         style: { background: C.okBg, color: C.ok }
-      }, p.code || p.name, /*#__PURE__*/React.createElement("button", {
+      }, selected.code || selected.name, /*#__PURE__*/React.createElement("button", {
         type: "button",
-        onClick: () => remove(p.id),
-        "aria-label": `Remove ${p.name}`,
+        onClick: remove,
+        "aria-label": `Remove ${selected.name}`,
         className: "ml-0.5"
-      }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 10 }))))),
-    selected.length === 0 && /*#__PURE__*/React.createElement("div", { className: "text-xs", style: { color: C.muted } }, "No parameters linked yet — tick from the list below."),
+      }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 10 })))),
+    !selected && /*#__PURE__*/React.createElement("div", { className: "text-xs", style: { color: C.muted } }, "No parameter linked yet — pick one from the list below. This test type will report that single parameter."),
     /*#__PURE__*/React.createElement("label", {
       className: "flex items-center gap-1.5 text-xs",
       style: { color: C.muted }
@@ -1145,22 +1150,31 @@ function TestTypeBuilder({
   const [qcRules, setQcRules] = useState(initial?.qcRules || []);
   const [qcFrequency, setQcFrequency] = useState(initial?.qcFrequency ? String(initial.qcFrequency) : "");
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  // Cost is defined once on the Parameter (Standard Fee, in Test
-  // Configuration › Parameters) — so instead of re-typing it here, the
-  // Test Type's Cost of Test auto-fills as the sum of the linked
-  // parameters' Standard Fee every time the selection changes. Still a
-  // normal editable field afterwards, in case this test type's price
-  // should differ from the sum (e.g. a discounted package).
+  // A Test Type now reports exactly one Parameter (see ParameterLinker). Once
+  // that Parameter is picked, Name / Method / Cost are no longer typed by
+  // hand — they're derived straight from the Parameter master record and
+  // kept in lock-step with it:
+  //   Name   = "<Parameter Name> (<Parameter Short Name>)", e.g. "Iron (Fe)"
+  //   Method = the Parameter's Method Ref
+  //   Cost   = the Parameter's Standard Fee
+  // These three fields are disabled (locked) below whenever a parameter is
+  // linked, so the only way to change them is to edit the Parameter itself
+  // in Test Configuration › Parameters.
+  const linkedParameter = linkedParameterIds.length > 0
+    ? (parameters || []).find(x => x.id === linkedParameterIds[0]) || null
+    : null;
+  const fieldsLocked = !!linkedParameter;
   React.useEffect(() => {
-    if (linkedParameterIds.length === 0) return;
-    const sum = linkedParameterIds.reduce((total, id) => {
-      const p = (parameters || []).find(x => x.id === id);
-      const fee = Number(p?.standardFee);
-      return total + (Number.isFinite(fee) ? fee : 0);
-    }, 0);
-    setCostPerTest(String(sum));
+    if (!linkedParameter) return;
+    const autoName = linkedParameter.shortName
+      ? `${linkedParameter.name} (${linkedParameter.shortName})`
+      : linkedParameter.name;
+    setTestName(autoName || "");
+    setMethod(linkedParameter.methodRef || "");
+    const fee = Number(linkedParameter.standardFee);
+    setCostPerTest(Number.isFinite(fee) ? String(fee) : "0");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkedParameterIds, parameters]);
+  }, [linkedParameter]);
   const chemOptions = {
     raw: chemicals,
     options: chemicals.map(c => ({
@@ -1172,7 +1186,9 @@ function TestTypeBuilder({
     value: e.id,
     label: e.name
   }));
-  const combinedName = [testName.trim(), method.trim()].filter(Boolean).join("-");
+  const combinedName = fieldsLocked
+    ? testName.trim()
+    : [testName.trim(), method.trim()].filter(Boolean).join("-");
 
   // Inline validation — same red-border + message-below-field pattern used in Add Test Record.
   const errors = {};
@@ -1222,12 +1238,12 @@ function TestTypeBuilder({
   }), "Please fix the highlighted field(s) below before saving."), /*#__PURE__*/React.createElement(CollapsibleSection, {
     step: 1,
     title: "Basic Info",
-    subtitle: "Select the parameter(s) this test type covers, then name, cost & default equipment"
+    subtitle: "Select the single parameter this test type covers — name, method & cost auto-fill and lock, then set default equipment"
   }, /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement("div", {
       className: "text-xs font-semibold mb-1.5",
       style: { color: C.ink }
-    }, "Parameter(s) this Test Type reports"),
+    }, "Parameter this Test Type reports"),
     /*#__PURE__*/React.createElement(ParameterLinker, {
       parameters: parameters || [],
       selectedIds: linkedParameterIds,
@@ -1236,17 +1252,30 @@ function TestTypeBuilder({
   ), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-2 gap-3"
   }, /*#__PURE__*/React.createElement(TextField, {
-    label: "Name of Test",
+    label: fieldsLocked ? "Name of Test (locked — from Parameter)" : "Name of Test",
     value: testName,
     onChange: e => setTestName(e.target.value),
     placeholder: "e.g. Arsenic (As)",
-    error: errors.testName
+    error: errors.testName,
+    disabled: fieldsLocked,
+    style: fieldsLocked ? { background: C.bg, color: C.muted, cursor: "not-allowed" } : undefined
   }), /*#__PURE__*/React.createElement(TextField, {
-    label: "Method",
+    label: fieldsLocked ? "Method (locked — from Parameter)" : "Method",
     value: method,
     onChange: e => setMethod(e.target.value),
-    placeholder: "e.g. HVG"
-  })), combinedName && /*#__PURE__*/React.createElement("div", {
+    placeholder: "e.g. HVG",
+    disabled: fieldsLocked,
+    style: fieldsLocked ? { background: C.bg, color: C.muted, cursor: "not-allowed" } : undefined
+  })), fieldsLocked && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs p-2 rounded flex items-center gap-1.5",
+    style: {
+      background: C.infoBg,
+      color: C.info
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "lock",
+    size: 13
+  }), "Name, Method and Cost are locked — they're taken automatically from the linked parameter \"", linkedParameter.name, linkedParameter.shortName ? ` (${linkedParameter.shortName})` : "", "\". To change them, edit the parameter in Test Configuration \u203a Parameters."), combinedName && /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded",
     style: {
       background: C.okBg,
@@ -1259,14 +1288,16 @@ function TestTypeBuilder({
     value: costPerTest,
     onChange: e => setCostPerTest(e.target.value),
     placeholder: "e.g. 100 — use 0 for free tests",
-    error: errors.costPerTest
-  }), linkedParameterIds.length > 0 && /*#__PURE__*/React.createElement("div", {
+    error: errors.costPerTest,
+    disabled: fieldsLocked,
+    style: fieldsLocked ? { background: C.bg, color: C.muted, cursor: "not-allowed" } : undefined
+  }), fieldsLocked && /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded",
     style: {
       background: C.okBg,
       color: C.ok
     }
-  }, "Auto-filled from the Standard Fee set on the linked parameter(s) — adjust the number above if this test type should cost something different."), /*#__PURE__*/React.createElement("div", {
+  }, "Auto-filled from the Standard Fee set on the linked parameter — unlink the parameter above if this test type needs a different name, method, or cost."), /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded",
     style: {
       background: C.infoBg,
@@ -1472,6 +1503,7 @@ function TestConfigurationTab({
       masterChemicals: masterChemicals,
       setMasterChemicals: setMasterChemicals,
       parameters: parameters,
+      setParameters: setParameters,
       testRecords: testRecords,
       notify: notify
     })
@@ -1490,6 +1522,7 @@ function TestTypesTab({
   masterChemicals,
   setMasterChemicals,
   parameters,
+  setParameters,
   testRecords,
   notify
 }) {
@@ -1568,6 +1601,12 @@ function TestTypesTab({
       };
     });
     const equip = equipment.find(e => e.id === t.defaultEquipmentId);
+    // Linked parameter travels with the export by value (code/name/etc, not
+    // by id — ids won't match on the receiving lab). If that lab doesn't have
+    // this parameter registered yet, importing will auto-create it (same
+    // "reuse by name, create what's missing" pattern already used for
+    // chemicals/gases/machines below).
+    const linkedParam = (t.linkedParameterIds || []).map(id => (parameters || []).find(p => p.id === id)).filter(Boolean)[0] || null;
     const payload = {
       schema: "aqualab-testtype-export-v1",
       exportedAt: new Date().toISOString(),
@@ -1579,6 +1618,24 @@ function TestTypesTab({
         feeApplicable: t.feeApplicable,
         dilutionEnabled: t.dilutionEnabled
       },
+      linkedParameter: linkedParam ? {
+        code: linkedParam.code,
+        name: linkedParam.name,
+        shortName: linkedParam.shortName,
+        unit: linkedParam.unit,
+        methodRef: linkedParam.methodRef,
+        category: linkedParam.category,
+        decimalPlaces: linkedParam.decimalPlaces,
+        lod: linkedParam.lod,
+        loq: linkedParam.loq,
+        tatHours: linkedParam.tatHours,
+        standardFee: linkedParam.standardFee,
+        minDetection: linkedParam.minDetection,
+        maxDetection: linkedParam.maxDetection,
+        refLimitMin: linkedParam.refLimitMin,
+        refLimitMax: linkedParam.refLimitMax,
+        refStandard: linkedParam.refStandard
+      } : null,
       defaultEquipmentName: equip ? equip.name : "",
       chemicalRequirements: (t.chemicalRequirements || []).map(r => ({
         chemicalName: chemNames[r.chemicalId]?.name || r.chemical,
@@ -1623,13 +1680,54 @@ function TestTypesTab({
       createdGas = 0,
       reusedGas = 0,
       createdMachine = 0,
-      reusedMachine = 0;
+      reusedMachine = 0,
+      createdParam = 0,
+      reusedParam = 0;
     const conflicts = [];
     const nextChemicals = [...chemicals];
     const nextMaster = [...masterChemicals];
     const nextGasList = [...gasList];
     const nextEquipment = [...equipment];
+    const nextParameters = [...(parameters || [])];
     const usedNamesThisBatch = [];
+    // Resolve a linked parameter by Code (preferred) or Name — reuse the
+    // existing registered parameter if this lab already has it, otherwise
+    // auto-create it (mirrors resolveChemical/resolveGas/resolveMachine
+    // below), so an imported test type is never left unlinked just because
+    // the destination lab hadn't registered that parameter yet.
+    function resolveParameter(p) {
+      if (!p || (!p.code && !p.name)) return null;
+      let existing = nextParameters.find(x =>
+        (p.code && x.code && x.code.toLowerCase() === p.code.toLowerCase()) ||
+        (p.name && x.name && x.name.toLowerCase() === p.name.toLowerCase())
+      );
+      if (existing) {
+        reusedParam++;
+        return existing;
+      }
+      existing = {
+        id: uid("param"),
+        code: p.code || p.name,
+        name: p.name || p.code,
+        shortName: p.shortName || "",
+        unit: p.unit || "",
+        methodRef: p.methodRef || "",
+        category: p.category || "Others",
+        decimalPlaces: Number.isFinite(Number(p.decimalPlaces)) ? Number(p.decimalPlaces) : 2,
+        lod: p.lod ?? "",
+        loq: p.loq ?? "",
+        tatHours: p.tatHours ?? "",
+        standardFee: p.standardFee ?? "",
+        minDetection: p.minDetection ?? "",
+        maxDetection: p.maxDetection ?? "",
+        refLimitMin: p.refLimitMin ?? "",
+        refLimitMax: p.refLimitMax ?? "",
+        refStandard: p.refStandard || ""
+      };
+      nextParameters.push(existing);
+      createdParam++;
+      return existing;
+    }
     function resolveChemical(name, unit) {
       if (!name) return null;
       let c = nextChemicals.find(x => x.name.toLowerCase() === name.toLowerCase());
@@ -1708,6 +1806,7 @@ function TestTypesTab({
       const gasRequirements = (d.gasRequirements || []).map(mapGasReq);
       const dilutionGasRequirements = (d.dilutionGasRequirements || []).map(mapGasReq);
       const machine = resolveMachine(d.defaultEquipmentName);
+      const linkedParam = d.linkedParameter ? resolveParameter(d.linkedParameter) : null;
       let finalName = d.name || [d.testName, d.method].filter(Boolean).join("-");
       const nameTaken = n => testTypes.some(t => t.name.toLowerCase() === n.toLowerCase()) || usedNamesThisBatch.some(n2 => n2.toLowerCase() === n.toLowerCase());
       if (nameTaken(finalName)) {
@@ -1729,7 +1828,7 @@ function TestTypesTab({
         costPerTest: Number(d.costPerTest) || 0,
         feeApplicable: d.feeApplicable !== false,
         defaultEquipmentId: machine?.id || "",
-        linkedParameterIds: [],
+        linkedParameterIds: linkedParam ? [linkedParam.id] : [],
         chemicalRequirements,
         gasRequirements,
         dilutionEnabled: !!d.dilutionEnabled,
@@ -1741,6 +1840,7 @@ function TestTypesTab({
     setMasterChemicals(nextMaster);
     setGasList(nextGasList);
     setEquipment(nextEquipment);
+    if (typeof setParameters === "function") setParameters(nextParameters);
     setTestTypes(prev => [...prev, ...newTestTypes]);
     return {
       names: newTestTypes.map(t => t.name),
@@ -1750,6 +1850,8 @@ function TestTypesTab({
       reusedGas,
       createdMachine,
       reusedMachine,
+      createdParam,
+      reusedParam,
       conflicts
     };
   }
@@ -1786,6 +1888,7 @@ function TestTypesTab({
         costPerTest: payload.testType.costPerTest,
         feeApplicable: payload.testType.feeApplicable,
         dilutionEnabled: payload.testType.dilutionEnabled,
+        linkedParameter: payload.linkedParameter || null,
         defaultEquipmentName: payload.defaultEquipmentName,
         chemicalRequirements: payload.chemicalRequirements || [],
         dilutionChemicalRequirements: payload.dilutionChemicalRequirements || [],
@@ -1864,6 +1967,8 @@ function TestTypesTab({
       const method = getVal(row, "method");
       const key = testName.toLowerCase() + "|" + method.toLowerCase();
       if (!groups.has(key)) {
+        const paramCode = getVal(row, "parametercode");
+        const paramName = getVal(row, "parametername");
         groups.set(key, {
           testName,
           method,
@@ -1871,6 +1976,15 @@ function TestTypesTab({
           feeApplicable: !getVal(row, "feeapplicable") || truthy(getVal(row, "feeapplicable")),
           dilutionEnabled: truthy(getVal(row, "dilutionenabled")),
           defaultEquipmentName: getVal(row, "machinename"),
+          linkedParameter: (paramCode || paramName) ? {
+            code: paramCode || paramName,
+            name: paramName || paramCode,
+            shortName: getVal(row, "parametershortname"),
+            unit: getVal(row, "parameterunit"),
+            methodRef: getVal(row, "parametermethodref") || method,
+            category: getVal(row, "parametercategory"),
+            standardFee: getVal(row, "parameterfee") === "" ? Number(getVal(row, "costpertest")) || 0 : Number(getVal(row, "parameterfee")) || 0
+          } : null,
           chemicalRequirements: [],
           dilutionChemicalRequirements: [],
           gasRequirements: [],
@@ -1917,9 +2031,9 @@ function TestTypesTab({
     };
   }
   function downloadImportTemplate() {
-    const header = "TestName,Method,CostPerTest,FeeApplicable,DilutionEnabled,MachineName,RequirementType,ChemicalOrGasName,Unit,Optional";
-    const sample1 = "Arsenic (As),HVG,100,Y,N,HVG Analyzer,Chemical,Fe Standard,ml,N";
-    const sample2 = "Arsenic (As),HVG,100,Y,N,HVG Analyzer,Gas,Acetylene,kg,N";
+    const header = "TestName,Method,CostPerTest,FeeApplicable,DilutionEnabled,MachineName,ParameterCode,ParameterName,ParameterShortName,ParameterUnit,ParameterMethodRef,ParameterCategory,ParameterFee,RequirementType,ChemicalOrGasName,Unit,Optional";
+    const sample1 = "Arsenic (As),HVG,100,Y,N,HVG Analyzer,As,Arsenic,As,mg/L,HVG,Heavy Metal,100,Chemical,Fe Standard,ml,N";
+    const sample2 = "Arsenic (As),HVG,100,Y,N,HVG Analyzer,As,Arsenic,As,mg/L,HVG,Heavy Metal,100,Gas,Acetylene,kg,N";
     const blob = new Blob([[header, sample1, sample2].join("\n")], {
       type: "text/csv"
     });
@@ -2105,7 +2219,7 @@ function TestTypesTab({
   }), "New Test Type"))), /*#__PURE__*/React.createElement(Banner, {
     tone: "info",
     storageKey: "testtypes-import-export-tip"
-  }, "Export a test type to share its full setup (chemicals, gases, machine, requirements) with another lab as a .json file. Importing recreates the test type(s) here from .xlsx, .csv, or .json — reusing any chemical/gas/machine that already exists by name and creating what's missing."), ttFiltered.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
+  }, "Export a test type to share its full setup (linked parameter, chemicals, gases, machine, requirements) with another lab as a .json file. Importing recreates the test type(s) here from .xlsx, .csv, or .json — reusing any parameter/chemical/gas/machine that already exists by code or name, and auto-registering (like Inventory) whatever is missing."), ttFiltered.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
     icon: "beaker",
     title: testTypes.length === 0 ? "No test types yet" : "No test types match your search",
     subtitle: testTypes.length === 0 ? "Design one — equipment, chemical/gas requirements, and cost per sample." : "Try a different name, method, or equipment.",
@@ -2426,7 +2540,7 @@ function TestTypesTab({
     style: {
       color: C.muted
     }
-  }, (d.chemicalRequirements || []).length, " chemical(s) · ", (d.gasRequirements || []).length, " gas(es)", d.dilutionEnabled ? " · dilution configured" : "")))), importParsed.errors.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, (d.chemicalRequirements || []).length, " chemical(s) · ", (d.gasRequirements || []).length, " gas(es)", d.dilutionEnabled ? " · dilution configured" : "", d.linkedParameter ? ` · parameter: ${d.linkedParameter.code || d.linkedParameter.name}` : "")))), importParsed.errors.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "p-2 rounded",
     style: {
       background: C.warnBg
@@ -2492,6 +2606,16 @@ function TestTypesTab({
     name: "check",
     size: 13
   }), "Success — imported: ", importSummary.names.join(", ")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "beaker",
+    size: 14,
+    color: C.teal
+  }), "Parameters: ", /*#__PURE__*/React.createElement(Badge, {
+    tone: "ok"
+  }, importSummary.createdParam || 0, " new"), /*#__PURE__*/React.createElement(Badge, {
+    tone: "info"
+  }, importSummary.reusedParam || 0, " reused")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "flask",
