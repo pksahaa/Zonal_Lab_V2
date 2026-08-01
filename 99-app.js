@@ -526,6 +526,7 @@ function LabApp({
     setReferences: setReferences,
     testTypes: testTypes,
     testRecords: testRecords,
+    parameters: parameters,
     subBatches: subBatches,
     setSubBatches: setSubBatches,
     equipment: equipment,

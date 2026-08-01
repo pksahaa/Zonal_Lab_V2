@@ -90,9 +90,19 @@ function bulkReturnToAnalystFromReview(sampleList, testTypeId, testTypeName, ses
 }
 
 // ---- small presentational bits ----
-function StageResultRow({ sample, testTypeId, testRecords, references, goToSample }) {
+// showSystemRemark: only "Awaiting Review" and "Awaiting Approval" pass this
+// (see ReviewQueue / ApproveQueue below) — Pending Upload and Release stay
+// exactly as they were.
+function StageResultRow({ sample, testTypeId, testRecords, testTypes, parameters, references, goToSample, showSystemRemark, setSamples }) {
   const resultInfo = getSampleResultForTest(sample, testTypeId, testRecords);
   const ref = sample.referenceId ? findReferenceById(references, sample.referenceId) : null;
+  const evaluated = showSystemRemark
+    ? evaluateSampleResultsForTest(sample, testTypeId, testTypes, parameters, testRecords)
+    : [];
+  function handleManualRemarkChange(text) {
+    const updated = setManualRemarkOnSample(sample, testTypeId, text);
+    setSamples?.(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
+  }
   return E("tr", { key: sample.id, className: "border-t", style: { borderColor: C.border } },
     E("td", { className: "px-3 py-1.5" },
       E("button", {
@@ -107,11 +117,20 @@ function StageResultRow({ sample, testTypeId, testRecords, references, goToSampl
       resultInfo && resultInfo.results && resultInfo.results.length
         ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
         : "—"
+    ),
+    showSystemRemark && E("td", { className: "px-3 py-1.5" },
+      E(SystemRemarkCell, {
+        evaluated,
+        manualRemark: getManualRemark(sample, testTypeId),
+        onManualRemarkChange: handleManualRemarkChange,
+        editable: !!setSamples
+      })
     )
   );
 }
 
-function ParamGroupCard({ title, subtitle, group, testRecords, testTypes, references, goToSample, qcWarn, actions }) {
+function ParamGroupCard({ title, subtitle, group, testRecords, testTypes, parameters, references, goToSample, qcWarn, actions, showSystemRemark, setSamples }) {
+  const headers = showSystemRemark ? ["Sample", "Client", "Reference", "Result", "System Remark"] : ["Sample", "Client", "Reference", "Result"];
   return E(SectionCard, { title, subtitle: subtitle, className: "mb-3" },
     qcWarn && E("div", {
       className: "text-[11px] px-2 py-1.5 rounded mb-2 flex items-center gap-1.5",
@@ -121,13 +140,16 @@ function ParamGroupCard({ title, subtitle, group, testRecords, testTypes, refere
       E("table", { className: "w-full text-left" },
         E("thead", null,
           E("tr", null,
-            ["Sample", "Client", "Reference", "Result"].map(h =>
+            headers.map(h =>
               E("th", { key: h, className: "px-3 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
             )
           )
         ),
         E("tbody", null, group.samples.map(sample =>
-          E(StageResultRow, { key: sample.id, sample, testTypeId: group.testTypeId, testRecords, references, goToSample })
+          E(StageResultRow, {
+            key: sample.id, sample, testTypeId: group.testTypeId, testRecords, testTypes, parameters, references, goToSample,
+            showSystemRemark, setSamples
+          })
         ))
       )
     ),
@@ -197,7 +219,7 @@ function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, refer
   );
 }
 
-function ReviewQueue({ samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }) {
+function ReviewQueue({ samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "results_entered"), [samples]);
   const [returningKey, setReturningKey] = React.useState(null);
   const [returnNote, setReturnNote] = React.useState("");
@@ -211,7 +233,8 @@ function ReviewQueue({ samples, setSamples, testRecords, testTypes, references, 
       key: group.testTypeId,
       title: `${group.testTypeName} — ${group.samples.length} awaiting review`,
       subtitle: "Technical review — moves results to Awaiting Approval.",
-      group, testRecords, testTypes, references, goToSample, qcWarn,
+      group, testRecords, testTypes, parameters, references, goToSample, qcWarn,
+      showSystemRemark: true, setSamples,
       actions: [
         E(Button, {
           key: "mr", size: "sm",
@@ -243,7 +266,7 @@ function ReviewQueue({ samples, setSamples, testRecords, testTypes, references, 
   }));
 }
 
-function ApproveQueue({ samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }) {
+function ApproveQueue({ samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "under_review"), [samples]);
   const [signingKey, setSigningKey] = React.useState(null);
   if (!groups.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "No parameters awaiting final approval right now.");
@@ -253,7 +276,8 @@ function ApproveQueue({ samples, setSamples, testRecords, testTypes, references,
       E(ParamGroupCard, {
         title: `${group.testTypeName} — ${group.samples.length} awaiting final approval`,
         subtitle: "Signature-gated final decision.",
-        group, testRecords, testTypes, references, goToSample,
+        group, testRecords, testTypes, parameters, references, goToSample,
+        showSystemRemark: true, setSamples,
         actions: [
           E(Button, {
             key: "fa", size: "sm",
@@ -321,6 +345,7 @@ function ResultsWorkflowTab({
   references,
   testTypes,
   testRecords,
+  parameters,
   session,
   notify,
   goToTestEntry,
@@ -366,8 +391,8 @@ function ResultsWorkflowTab({
       }, E(Icon, { name: s.icon, size: 14 }), s.label)
     )),
     active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, references, goToTestEntry }),
-    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }),
-    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }),
+    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }),
+    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }),
     active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample })
   );
 }
