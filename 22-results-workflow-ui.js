@@ -76,84 +76,277 @@ function bulkMarkReviewed(sampleList, testTypeId, testTypeName, session, setSamp
   });
   notify?.(`${count} sample(s) marked reviewed for ${testTypeName} — ready for final approval.`, "ok");
 }
-function bulkReturnToAnalystFromReview(sampleList, testTypeId, testTypeName, session, setSamples, notify, note) {
-  let count = 0;
-  const finalNote = (note || "").trim() || `Returned to analyst for ${testTypeName}.`;
-  sampleList.forEach(sample => {
-    const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
-    if (!rt || !["results_entered", "under_review"].includes(rt.status)) return;
-    const updated = setRequestedTestStatus(sample, testTypeId, "in_progress", session, finalNote);
-    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
-    count++;
-  });
-  notify?.(`${count} sample(s) returned to analyst for ${testTypeName}.`, "warn");
+// (Group-level "Return to Analyst" used to live here as
+// bulkReturnToAnalystFromReview — superseded by the per-row/per-batch
+// Return to Analyst action below, which also retracts the prior result via
+// voidSampleResultForTest so the sample genuinely becomes eligible for a
+// new Analytical Batch again, the way this function never did.)
+
+// ---- shared: flatten a testType-grouped queue into one row per
+// (sample, testTypeId) pair — the unit both Flat View and Analytical Batch
+// View are built from. ----
+function flattenStageGroups(groups) {
+  const rows = [];
+  groups.forEach(g => g.samples.forEach(sample => rows.push({ sample, testTypeId: g.testTypeId, testTypeName: g.testTypeName })));
+  return rows;
 }
 
-// ---- small presentational bits ----
-// showSystemRemark: only "Awaiting Review" and "Awaiting Approval" pass this
-// (see ReviewQueue / ApproveQueue below) — Pending Upload and Release stay
-// exactly as they were.
-function StageResultRow({ sample, testTypeId, testRecords, testTypes, parameters, references, goToSample, showSystemRemark, setSamples }) {
+// ---- shared: group rows by their originating Analytical Batch — the same
+// grouping concept as Sample Registration's "Group by Batch", just keyed off
+// the test record's subBatchId (via originBatchForSampleTest, 16-sub-batch.js)
+// instead of the sample's Reference. ----
+function groupRowsByBatch(rows, testRecords, subBatches) {
+  const map = {};
+  rows.forEach(row => {
+    const bucket = originBatchForSampleTest(row.sample, row.testTypeId, testRecords, subBatches);
+    const key = `${bucket.key}__${row.testTypeId}`;
+    if (!map[key]) map[key] = { key, label: bucket.label, testTypeId: row.testTypeId, testTypeName: row.testTypeName, rows: [] };
+    map[key].rows.push(row);
+  });
+  return Object.values(map).sort((a, b) => a.label.localeCompare(b.label) || a.testTypeName.localeCompare(b.testTypeName));
+}
+
+// ---- Flat View / Analytical Batch View toggle — visually the same pill
+// pattern as Sample Registration's Flat View / Group by Batch toggle. ----
+function StageViewToggle({ viewMode, setViewMode }) {
+  const opts = [{ k: "flat", label: "Flat View" }, { k: "batch", label: "Analytical Batch View" }];
+  return E("div", {
+    className: "inline-flex p-0.5 rounded-lg mb-3",
+    style: { background: C.bg, border: `1px solid ${C.border}` }
+  }, opts.map(v => E("button", {
+    key: v.k,
+    type: "button",
+    onClick: () => setViewMode(v.k),
+    className: "px-3 py-1 rounded-md text-xs font-medium",
+    style: {
+      background: viewMode === v.k ? C.card : "transparent",
+      color: viewMode === v.k ? C.ink : C.muted,
+      boxShadow: viewMode === v.k ? "0 1px 2px rgba(0,0,0,0.08)" : "none"
+    }
+  }, v.label)));
+}
+
+// ---- per-row Return to Analyst / On Hold / Resume — available on every
+// sample row in Awaiting Review, Awaiting Approval, and Approved-Release,
+// independent of every other sample in whatever Analytical Batch it came
+// from and independent of every other parameter on the same sample.
+//
+//   Return to Analyst — retracts this sample's specific result (voided, not
+//     deleted — full audit trail stays intact) and resets this parameter's
+//     status to "in_progress", so the sample becomes eligible for a
+//     brand-new Analytical Batch again: it behaves exactly like a freshly
+//     registered sample. It no longer shows up in ANY Results Workflow
+//     queue — it's back with Sample Registration / Add Test Record instead.
+//   On Hold — flags the parameter and parks it at Awaiting Review (staying
+//     put if it was already there). It keeps showing up — visibly, tagged
+//     "On Hold" — so nothing silently disappears; it's just skipped by
+//     whatever bulk action moves the rest of that batch/group forward.
+//   Resume — clears the hold with no status change.
+// ----
+function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size }) {
+  const held = isTestOnHold(sample, testTypeId);
+  function doReturn() {
+    const nextRecords = voidSampleResultForTest(testRecords, sample, testTypeId);
+    if (nextRecords !== testRecords) setTestRecords?.(nextRecords);
+    const updated = returnRequestedTestToAnalyst(sample, testTypeId, testTypeName, session);
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    notify?.(`${sample.sampleCode} returned to analyst for ${testTypeName} — back in the pending-testing queue, same as a freshly registered sample.`, "warn");
+  }
+  function doHold() {
+    const updated = holdRequestedTestForSample(sample, testTypeId, testTypeName, session);
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    notify?.(`${sample.sampleCode} put on hold for ${testTypeName} — parked in Awaiting Review, other samples in this batch are unaffected.`, "warn");
+  }
+  function doResume() {
+    const updated = resumeRequestedTestForSample(sample, testTypeId, testTypeName, session);
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    notify?.(`${sample.sampleCode} resumed for ${testTypeName} — back in the normal queue.`, "ok");
+  }
+  return E("div", { className: "flex flex-wrap items-center gap-1.5" },
+    held
+      ? E(Button, { key: "resume", size: size || "sm", variant: "outline", onClick: doResume }, "Resume")
+      : E(Button, { key: "hold", size: size || "sm", variant: "outline", onClick: doHold }, "On Hold"),
+    E(Button, { key: "return", size: size || "sm", variant: "ghost", onClick: doReturn }, "Return to Analyst")
+  );
+}
+
+// ---- one sample row, used by both Flat View (all rows in one table, with
+// a Test Type column since nothing else identifies which parameter a row is
+// for) and Analytical Batch View (rows nested under their originating
+// batch, Test Type column omitted since a batch's rows share one method).
+// Carries its own primary stage action (Mark Reviewed / Final Approve-Reject
+// / Release) sized to just this one sample — reuses the exact same
+// bulkMarkReviewed / bulkDecideParameter / bulkReleaseParameter functions
+// bulk actions use, just called with a one-sample list, so per-row and
+// bulk/batch behavior can never drift apart. ----
+function StageRow({ row, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn, signingKey, setSigningKey }) {
+  const { sample, testTypeId, testTypeName } = row;
+  const held = isTestOnHold(sample, testTypeId);
   const resultInfo = getSampleResultForTest(sample, testTypeId, testRecords);
   const ref = sample.referenceId ? findReferenceById(references, sample.referenceId) : null;
-  const evaluated = showSystemRemark
-    ? evaluateSampleResultsForTest(sample, testTypeId, testTypes, parameters, testRecords)
-    : [];
+  const evaluated = showSystemRemark ? evaluateSampleResultsForTest(sample, testTypeId, testTypes, parameters, testRecords) : [];
+  const rowKey = `${sample.id}__${testTypeId}`;
+  const isSigningThisRow = signingKey === rowKey;
   function handleManualRemarkChange(text) {
     const updated = setManualRemarkOnSample(sample, testTypeId, text);
     setSamples?.(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
   }
-  return E("tr", { key: sample.id, className: "border-t", style: { borderColor: C.border } },
-    E("td", { className: "px-3 py-1.5" },
-      E("button", {
-        className: "text-xs font-semibold underline",
-        style: { color: C.teal },
-        onClick: () => goToSample?.(sample.id)
-      }, sample.sampleCode)
+  function doMarkReviewed() {
+    bulkMarkReviewed([sample], testTypeId, testTypeName, session, setSamples, notify);
+  }
+  function doRelease() {
+    const result = bulkReleaseParameter([sample], testTypeId, testTypeName, session);
+    result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+    if (result.updated.length) notify?.(`${sample.sampleCode} released for ${testTypeName}.`, "ok");
+  }
+  const cells = [
+    E("td", { key: "sample", className: "px-3 py-1.5" },
+      E("button", { className: "text-xs font-semibold underline", style: { color: C.teal }, onClick: () => goToSample?.(sample.id) }, sample.sampleCode),
+      held && E("div", { className: "mt-0.5" }, E(Badge, { tone: "warn" }, "On Hold"))
     ),
-    E("td", { className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, sample.clientName || "—"),
-    E("td", { className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, ref ? referenceDisplayLabel(ref) : "—"),
-    E("td", { className: "px-3 py-1.5 text-xs", style: { color: C.ink } },
-      resultInfo && resultInfo.results && resultInfo.results.length
-        ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
-        : "—"
-    ),
-    showSystemRemark && E("td", { className: "px-3 py-1.5" },
-      E(SystemRemarkCell, {
-        evaluated,
-        manualRemark: getManualRemark(sample, testTypeId),
-        onManualRemarkChange: handleManualRemarkChange,
-        editable: !!setSamples
+    E("td", { key: "client", className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, sample.clientName || "—"),
+    E("td", { key: "ref", className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, ref ? referenceDisplayLabel(ref) : "—")
+  ];
+  if (showTestTypeColumn) cells.push(E("td", { key: "tt", className: "px-3 py-1.5 text-xs", style: { color: C.ink } }, testTypeName));
+  cells.push(E("td", { key: "result", className: "px-3 py-1.5 text-xs", style: { color: C.ink } },
+    resultInfo && resultInfo.results && resultInfo.results.length
+      ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
+      : "—"
+  ));
+  if (showSystemRemark) cells.push(E("td", { key: "remark", className: "px-3 py-1.5" },
+    E(SystemRemarkCell, { evaluated, manualRemark: getManualRemark(sample, testTypeId), onManualRemarkChange: handleManualRemarkChange, editable: !!setSamples })
+  ));
+  cells.push(E("td", { key: "actions", className: "px-3 py-1.5" },
+    E("div", { className: "flex flex-wrap items-center gap-1.5" },
+      !held && stage === "review" && E(Button, { size: "sm", onClick: doMarkReviewed }, "Mark Reviewed"),
+      !held && stage === "approve" && E(Button, { size: "sm", onClick: () => setSigningKey(isSigningThisRow ? null : rowKey) }, "Final Approve / Reject"),
+      !held && stage === "release" && E(Button, { size: "sm", onClick: doRelease }, E(Icon, { name: "printer", size: 12 }), "Release"),
+      E(RowHoldReturnActions, { sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size: "sm" })
+    )
+  ));
+  return E(React.Fragment, { key: rowKey },
+    E("tr", { className: "border-t", style: { borderColor: C.border } }, cells),
+    isSigningThisRow && E("tr", { key: `${rowKey}-sig` }, E("td", { colSpan: cells.length, className: "px-3 pb-2" },
+      E(SignatureCapture, {
+        user: session,
+        label: `Final Approval — ${testTypeName} (${sample.sampleCode})`,
+        onConfirm: payload => {
+          try {
+            const result = bulkDecideParameter([sample], testTypeId, testTypeName, payload, session);
+            result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+            if (result.updated.length) {
+              notify?.(
+                payload.decision === "approved" ? `${sample.sampleCode} approved for ${testTypeName}.` : `${sample.sampleCode} sent back to analyst for ${testTypeName}.`,
+                payload.decision === "approved" ? "ok" : "warn"
+              );
+            }
+          } catch (e) {
+            notify?.(e.message, "warn");
+          }
+          setSigningKey(null);
+        }
       })
+    ))
+  );
+}
+
+// ---- Flat View: every row from every group, in one table, Test Type
+// column included since there's no grouping header to imply it. ----
+function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
+  const [signingKey, setSigningKey] = React.useState(null);
+  const headers = ["Sample", "Client", "Reference", "Test Type", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
+  if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now.");
+  return E("div", { className: "overflow-x-auto rounded-lg", style: { border: `1px solid ${C.border}` } },
+    E("table", { className: "w-full text-left" },
+      E("thead", null, E("tr", null, headers.map(h =>
+        E("th", { key: h, className: "px-3 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
+      ))),
+      E("tbody", null, rows.map(row => E(StageRow, {
+        key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
+        setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: true, signingKey, setSigningKey
+      })))
     )
   );
 }
 
-function ParamGroupCard({ title, subtitle, group, testRecords, testTypes, parameters, references, goToSample, qcWarn, actions, showSystemRemark, setSamples }) {
-  const headers = showSystemRemark ? ["Sample", "Client", "Reference", "Result", "System Remark"] : ["Sample", "Client", "Reference", "Result"];
-  return E(SectionCard, { title, subtitle: subtitle, className: "mb-3" },
-    qcWarn && E("div", {
-      className: "text-[11px] px-2 py-1.5 rounded mb-2 flex items-center gap-1.5",
-      style: { background: C.warnBg, color: C.warn }
-    }, E(Icon, { name: "warning", size: 12 }), qcWarn),
-    E("div", { className: "overflow-x-auto" },
-      E("table", { className: "w-full text-left" },
-        E("thead", null,
-          E("tr", null,
-            headers.map(h =>
+// ---- Analytical Batch View: rows nested under the Analytical Batch (or
+// "Individual / No Batch") they came from, each section with its own
+// batch-scoped bulk action (applies to every non-held row in that section
+// only) alongside the same per-row actions Flat View has. ----
+function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
+  const [signingKey, setSigningKey] = React.useState(null);
+  const buckets = React.useMemo(() => groupRowsByBatch(rows, testRecords, subBatches), [rows, testRecords, subBatches]);
+  return E("div", null,
+    !buckets.length && E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now."),
+    buckets.map(bucket => {
+      const activeSamples = bucket.rows.filter(r => !isTestOnHold(r.sample, r.testTypeId)).map(r => r.sample);
+      const headers = ["Sample", "Client", "Reference", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
+      function doBulkMarkReviewed() {
+        bulkMarkReviewed(activeSamples, bucket.testTypeId, bucket.testTypeName, session, setSamples, notify);
+      }
+      function doBulkRelease() {
+        const result = bulkReleaseParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, session);
+        result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+        notify?.(`${result.updated.length} sample(s) released for ${bucket.testTypeName}.`, "ok");
+      }
+      const bucketSigningKey = `bucket__${bucket.key}`;
+      const isBucketSigning = signingKey === bucketSigningKey;
+      return E(SectionCard, {
+        key: bucket.key,
+        title: `${bucket.label} — ${bucket.testTypeName}`,
+        subtitle: `${bucket.rows.length} sample(s)${activeSamples.length !== bucket.rows.length ? ` · ${bucket.rows.length - activeSamples.length} on hold` : ""}`,
+        className: "mb-3"
+      },
+        E("div", { className: "overflow-x-auto" },
+          E("table", { className: "w-full text-left" },
+            E("thead", null, E("tr", null, headers.map(h =>
               E("th", { key: h, className: "px-3 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
-            )
+            ))),
+            E("tbody", null, bucket.rows.map(row => E(StageRow, {
+              key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
+              setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: false, signingKey, setSigningKey
+            })))
           )
         ),
-        E("tbody", null, group.samples.map(sample =>
-          E(StageResultRow, {
-            key: sample.id, sample, testTypeId: group.testTypeId, testRecords, testTypes, parameters, references, goToSample,
-            showSystemRemark, setSamples
-          })
-        ))
-      )
-    ),
-    E("div", { className: "flex flex-wrap gap-2 mt-2" }, actions)
+        activeSamples.length > 0 && E("div", { className: "flex flex-wrap gap-2 mt-2" },
+          stage === "review" && E(Button, { size: "sm", onClick: doBulkMarkReviewed }, E(Icon, { name: "check", size: 12 }), `Mark Reviewed — whole batch (${activeSamples.length})`),
+          stage === "approve" && E(Button, { size: "sm", onClick: () => setSigningKey(isBucketSigning ? null : bucketSigningKey) }, E(Icon, { name: "check", size: 12 }), `Final Approve / Reject — whole batch (${activeSamples.length})`),
+          stage === "release" && E(Button, { size: "sm", onClick: doBulkRelease }, E(Icon, { name: "printer", size: 12 }), `Release — whole batch (${activeSamples.length})`)
+        ),
+        isBucketSigning && E(SignatureCapture, {
+          user: session,
+          label: `Final Approval — ${bucket.label} · ${bucket.testTypeName} (${activeSamples.length} sample(s))`,
+          onConfirm: payload => {
+            try {
+              const result = bulkDecideParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, payload, session);
+              result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+              notify?.(
+                payload.decision === "approved" ? `${result.updated.length} sample(s) approved for ${bucket.testTypeName}.` : `${result.updated.length} sample(s) sent back to analyst for ${bucket.testTypeName}.`,
+                payload.decision === "approved" ? "ok" : "warn"
+              );
+            } catch (e) {
+              notify?.(e.message, "warn");
+            }
+            setSigningKey(null);
+          }
+        })
+      );
+    })
+  );
+}
+
+// ---- one queue's body: header + view toggle + Flat/Batch table. Shared by
+// Review / Approve / Release so the toggle behaves identically in all
+// three. ----
+function StageQueueBody({ stage, groups, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, emptyText }) {
+  const [viewMode, setViewMode] = React.useState("flat");
+  const rows = React.useMemo(() => flattenStageGroups(groups), [groups]);
+  if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, emptyText);
+  return E("div", null,
+    E(StageViewToggle, { viewMode, setViewMode }),
+    viewMode === "flat"
+      ? E(FlatStageTable, { rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })
+      : E(BatchStageTable, { rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })
   );
 }
 
@@ -219,121 +412,44 @@ function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, refer
   );
 }
 
-function ReviewQueue({ samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }) {
+function ReviewQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "results_entered"), [samples]);
-  const [returningKey, setReturningKey] = React.useState(null);
-  const [returnNote, setReturnNote] = React.useState("");
-  if (!groups.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "No parameters awaiting review right now.");
-  return E("div", null, groups.map(group => {
-    const qc = getQcStatusForMethod(group.testTypeId, testTypes, testRecords);
-    const qcWarn = qc.hasReject ? "Westgard violation on recent QC runs for this method — check QC Module before reviewing." :
-      qc.hasWarning ? "QC warning pattern on recent runs for this method — check QC Module before reviewing." : null;
-    const isReturning = returningKey === group.testTypeId;
-    return E(ParamGroupCard, {
-      key: group.testTypeId,
-      title: `${group.testTypeName} — ${group.samples.length} awaiting review`,
-      subtitle: "Technical review — moves results to Awaiting Approval.",
-      group, testRecords, testTypes, parameters, references, goToSample, qcWarn,
-      showSystemRemark: true, setSamples,
-      actions: [
-        E(Button, {
-          key: "mr", size: "sm",
-          onClick: () => bulkMarkReviewed(group.samples, group.testTypeId, group.testTypeName, session, setSamples, notify)
-        }, E(Icon, { name: "check", size: 12 }), "Mark Reviewed"),
-        E(Button, {
-          key: "rt", size: "sm", variant: "outline",
-          onClick: () => setReturningKey(isReturning ? null : group.testTypeId)
-        }, "Return to Analyst"),
-        isReturning && E("div", { key: "note", className: "w-full flex gap-2 mt-1" },
-          E("input", {
-            className: "border rounded px-2 py-1 text-xs flex-1",
-            style: { borderColor: C.border },
-            placeholder: "Reason for returning (optional)",
-            value: returnNote,
-            onChange: e => setReturnNote(e.target.value)
-          }),
-          E(Button, {
-            size: "sm", variant: "outline",
-            onClick: () => {
-              bulkReturnToAnalystFromReview(group.samples, group.testTypeId, group.testTypeName, session, setSamples, notify, returnNote);
-              setReturningKey(null);
-              setReturnNote("");
-            }
-          }, "Confirm Return")
-        )
-      ].filter(Boolean)
-    });
-  }));
-}
-
-function ApproveQueue({ samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }) {
-  const groups = React.useMemo(() => groupSamplesByParamStage(samples, "under_review"), [samples]);
-  const [signingKey, setSigningKey] = React.useState(null);
-  if (!groups.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "No parameters awaiting final approval right now.");
-  return E("div", null, groups.map(group => {
-    const isSigning = signingKey === group.testTypeId;
-    return E("div", { key: group.testTypeId },
-      E(ParamGroupCard, {
-        title: `${group.testTypeName} — ${group.samples.length} awaiting final approval`,
-        subtitle: "Signature-gated final decision.",
-        group, testRecords, testTypes, parameters, references, goToSample,
-        showSystemRemark: true, setSamples,
-        actions: [
-          E(Button, {
-            key: "fa", size: "sm",
-            onClick: () => setSigningKey(isSigning ? null : group.testTypeId)
-          }, E(Icon, { name: "check", size: 12 }), "Final Approve / Reject")
-        ]
-      }),
-      isSigning && E(SignatureCapture, {
-        key: "sig",
-        user: session,
-        label: `Final Approval — ${group.testTypeName} (${group.samples.length} sample(s))`,
-        onConfirm: payload => {
-          try {
-            const result = bulkDecideParameter(group.samples, group.testTypeId, group.testTypeName, payload, session);
-            result.updated.forEach(updated => {
-              setSamples(prev => prev.map(s => s.id === updated.id ? updated : s));
-            });
-            notify?.(
-              payload.decision === "approved"
-                ? `${result.updated.length} sample(s) approved for ${group.testTypeName}${result.skipped ? ` (${result.skipped} skipped)` : ""}.`
-                : `${result.updated.length} sample(s) sent back to analyst for ${group.testTypeName}.`,
-              payload.decision === "approved" ? "ok" : "warn"
-            );
-          } catch (e) {
-            notify?.(e.message, "warn");
-          }
-          setSigningKey(null);
-        }
-      })
-    );
-  }));
-}
-
-function ReleaseQueue({ samples, setSamples, testRecords, testTypes, references, session, notify, goToSample }) {
-  const groups = React.useMemo(() => groupSamplesByParamStage(samples, "approved"), [samples]);
-  if (!groups.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing approved and awaiting release right now.");
-  return E("div", null, groups.map(group =>
-    E(ParamGroupCard, {
-      key: group.testTypeId,
-      title: `${group.testTypeName} — ${group.samples.length} approved`,
-      subtitle: "Not signature-gated — same as the single-sample Release action.",
-      group, testRecords, testTypes, references, goToSample,
-      actions: [
-        E(Button, {
-          key: "rel", size: "sm",
-          onClick: () => {
-            const result = bulkReleaseParameter(group.samples, group.testTypeId, group.testTypeName, session);
-            result.updated.forEach(updated => {
-              setSamples(prev => prev.map(s => s.id === updated.id ? updated : s));
-            });
-            notify?.(`${result.updated.length} sample(s) released for ${group.testTypeName}.`, "ok");
-          }
-        }, E(Icon, { name: "printer", size: 12 }), "Release")
-      ]
+  const qcWarnings = groups.map(g => {
+    const qc = getQcStatusForMethod(g.testTypeId, testTypes, testRecords);
+    if (qc.hasReject) return `${g.testTypeName}: Westgard violation on recent QC runs — check QC Module before reviewing.`;
+    if (qc.hasWarning) return `${g.testTypeName}: QC warning pattern on recent runs — check QC Module before reviewing.`;
+    return null;
+  }).filter(Boolean);
+  return E("div", null,
+    qcWarnings.map((w, i) => E("div", {
+      key: i,
+      className: "text-[11px] px-2 py-1.5 rounded mb-2 flex items-center gap-1.5",
+      style: { background: C.warnBg, color: C.warn }
+    }, E(Icon, { name: "warning", size: 12 }), w)),
+    E(StageQueueBody, {
+      stage: "review", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+      showSystemRemark: true,
+      emptyText: "No parameters awaiting review right now."
     })
-  ));
+  );
+}
+
+function ApproveQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
+  const groups = React.useMemo(() => groupSamplesByParamStage(samples, "under_review"), [samples]);
+  return E(StageQueueBody, {
+    stage: "approve", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+    showSystemRemark: true,
+    emptyText: "No parameters awaiting final approval right now."
+  });
+}
+
+function ReleaseQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
+  const groups = React.useMemo(() => groupSamplesByParamStage(samples, "approved"), [samples]);
+  return E(StageQueueBody, {
+    stage: "release", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+    showSystemRemark: false,
+    emptyText: "Nothing approved and awaiting release right now."
+  });
 }
 
 // ---- main tab ----
@@ -345,6 +461,7 @@ function ResultsWorkflowTab({
   references,
   testTypes,
   testRecords,
+  setTestRecords,
   parameters,
   session,
   notify,
@@ -391,8 +508,8 @@ function ResultsWorkflowTab({
       }, E(Icon, { name: s.icon, size: 14 }), s.label)
     )),
     active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, references, goToTestEntry }),
-    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }),
-    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, testTypes, parameters, references, session, notify, goToSample }),
-    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, testTypes, references, session, notify, goToSample })
+    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
+    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
+    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample })
   );
 }

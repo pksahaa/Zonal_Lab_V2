@@ -175,6 +175,74 @@ function syncRequestedTestsToStage(sample, fromStatuses, toStatus, user, note) {
   return next;
 }
 
+// ============================================================================
+// PER-PARAMETER ON HOLD / RETURN TO ANALYST (Results Workflow) — these act on
+// ONE (sample, testTypeId) pair at a time, independent of every other
+// parameter on the sample and every other sample in whatever Analytical
+// Batch it came from, so "do this for one sample" never disturbs the rest
+// of that batch's progress.
+//
+//   On Hold      — flags the parameter (rt.onHold = true) and parks its
+//                   status at "results_entered" (Awaiting Review) if it had
+//                   moved further along (Awaiting Approval / Approved). If
+//                   it was already at Awaiting Review, it simply stays
+//                   there, now flagged. Held rows keep showing up in
+//                   Awaiting Review — visibly, with a badge — so nothing
+//                   silently vanishes; they're just excluded from whatever
+//                   bulk action moves the rest of the group forward.
+//   Resume       — clears the onHold flag with no status change, handing
+//                   the parameter back into the normal queue.
+//   Return to    — sends the parameter's status back to "in_progress" (the
+//   Analyst        same stage a freshly-assigned, not-yet-tested parameter
+//                   sits at) and clears onHold. Combined with
+//                   voidSampleResultForTest() below (which retracts this
+//                   sample's specific result from whatever test record
+//                   currently carries it), the sample becomes eligible for
+//                   a brand-new Analytical Batch again — i.e. it behaves
+//                   exactly like a newly registered sample, per parameter.
+// ============================================================================
+function isTestOnHold(sample, testTypeId) {
+  const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+  return !!(rt && rt.onHold);
+}
+function holdRequestedTestForSample(sample, testTypeId, testTypeName, user, note) {
+  const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+  if (!rt) return sample;
+  const flagged = {
+    ...sample,
+    requestedTests: sample.requestedTests.map(r => r.testTypeId === testTypeId ? { ...r, onHold: true } : r)
+  };
+  const stepped = rt.status === "results_entered" ? flagged : setRequestedTestStatus(flagged, testTypeId, "results_entered", user, note);
+  return addCustodyEvent(stepped, {
+    action: `On Hold: ${testTypeName}`,
+    toUser: user?.name,
+    notes: note || `${testTypeName} put on hold pending resolution.`
+  }, user);
+}
+function resumeRequestedTestForSample(sample, testTypeId, testTypeName, user, note) {
+  const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+  if (!rt || !rt.onHold) return sample;
+  const flagged = {
+    ...sample,
+    requestedTests: sample.requestedTests.map(r => r.testTypeId === testTypeId ? { ...r, onHold: false } : r)
+  };
+  return addCustodyEvent(flagged, {
+    action: `Resumed: ${testTypeName}`,
+    toUser: user?.name,
+    notes: note || `${testTypeName} taken off hold — back in the normal queue.`
+  }, user);
+}
+function returnRequestedTestToAnalyst(sample, testTypeId, testTypeName, user, note) {
+  const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
+  if (!rt) return sample;
+  const cleared = {
+    ...sample,
+    requestedTests: sample.requestedTests.map(r => r.testTypeId === testTypeId ? { ...r, onHold: false } : r)
+  };
+  return setRequestedTestStatus(cleared, testTypeId, "in_progress", user, note || `Returned to analyst for ${testTypeName}.`);
+}
+
+
 // ---- roles / permissions (additive — existing Administrator/Technician
 // users keep working unchanged; these two roles are optional extras a lab
 // can create for approval segregation-of-duties) ----

@@ -59,39 +59,6 @@ function hasLimit(v) {
   return v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
 }
 
-// Human-readable labels for each Limits field on a Parameter record (see
-// "Limits (Optional)" section of ParameterForm in 12a-parameters-ui.js) —
-// reused below so the System Remark badge can show which configured limit
-// actually drove a given remark, not just the result value.
-const LIMIT_FIELD_LABEL = {
-  lod: "LOD",
-  loq: "LOQ",
-  minDetection: "Min Detection",
-  maxDetection: "Max Detection",
-  refLimitMin: "Ref Limit Min",
-  refLimitMax: "Ref Limit Max"
-};
-
-// Builds the { limitLabel, limitValue } pair attached to a remark result.
-// `field` is a single Limits key (the one the rule actually tripped on), or
-// an array of two keys to show as a "min–max" range (used by the
-// "Within Acceptable Range" fallback, where no single limit was crossed).
-function describeLimit(cfg, field) {
-  if (Array.isArray(field)) {
-    const [minKey, maxKey] = field;
-    const min = hasLimit(cfg[minKey]) ? Number(cfg[minKey]) : null;
-    const max = hasLimit(cfg[maxKey]) ? Number(cfg[maxKey]) : null;
-    if (min === null && max === null) return { limitLabel: null, limitValue: null };
-    const label = minKey === "refLimitMin" ? "Ref Limit" : "Detection Range";
-    return {
-      limitLabel: label,
-      limitValue: `${min !== null ? fmtNum(min) : "—"}–${max !== null ? fmtNum(max) : "—"}`
-    };
-  }
-  if (!hasLimit(cfg[field])) return { limitLabel: null, limitValue: null };
-  return { limitLabel: LIMIT_FIELD_LABEL[field], limitValue: fmtNum(Number(cfg[field])) };
-}
-
 /**
  * generateResultRemark(result, parameterConfig, isDiluted)
  *
@@ -114,13 +81,13 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
 
   // ---- guard: nothing to evaluate yet ----
   if (!Number.isFinite(num)) {
-    return { remark: "Pending Result", flag: REMARK_FLAGS.UNKNOWN, displayValue: null, limitLabel: null, limitValue: null, ruleId: "no_result" };
+    return { remark: "Pending Result", flag: REMARK_FLAGS.UNKNOWN, displayValue: null, ruleId: "no_result" };
   }
   // ---- guard: parameter has no Limits configured at all — nothing to
   // validate against, so say so instead of silently claiming "Normal". ----
   const anyLimitConfigured = [cfg.lod, cfg.loq, cfg.minDetection, cfg.maxDetection, cfg.refLimitMin, cfg.refLimitMax].some(hasLimit);
   if (!anyLimitConfigured) {
-    return { remark: "No parameter limits configured for validation", flag: REMARK_FLAGS.UNKNOWN, displayValue: fmtNum(num), limitLabel: null, limitValue: null, ruleId: "no_config" };
+    return { remark: "No parameter limits configured for validation", flag: REMARK_FLAGS.UNKNOWN, displayValue: fmtNum(num), ruleId: "no_config" };
   }
 
   const lod = hasLimit(cfg.lod) ? Number(cfg.lod) : null;
@@ -148,7 +115,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
         remark: "Exceeds Reference Limit (Diluted)",
         flag: REMARK_FLAGS.EXCEEDED, // red — a genuine out-of-spec value even after dilution
         displayValue: fmtNum(num),
-        ...describeLimit(cfg, "refLimitMax"),
         ruleId: "diluted_exceeds_reference"
       };
     }
@@ -156,7 +122,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Within Reference Limit (Diluted)",
       flag: REMARK_FLAGS.NORMAL,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "refLimitMax"),
       ruleId: "diluted_within_reference"
     };
   }
@@ -168,7 +133,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Exceeds Max Detection Limit! Re-test with Dilution.",
       flag: REMARK_FLAGS.ACTION_REQUIRED,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "maxDetection"),
       ruleId: "exceeds_max_detection"
     };
   }
@@ -179,7 +143,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Below Detection Limit (ND)",
       flag: REMARK_FLAGS.INFO,
       displayValue: "< LOD",
-      ...describeLimit(cfg, "lod"),
       ruleId: "below_lod"
     };
   }
@@ -188,7 +151,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Trace Amount Present (Below Quantitation Limit)",
       flag: REMARK_FLAGS.INFO,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "loq"),
       ruleId: "below_loq"
     };
   }
@@ -197,7 +159,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Below Minimum Operating Limit",
       flag: REMARK_FLAGS.WARNING,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "minDetection"),
       ruleId: "below_min_detection"
     };
   }
@@ -210,7 +171,6 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Exceeds Standard Reference Limit",
       flag: REMARK_FLAGS.EXCEEDED,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "refLimitMax"),
       ruleId: "exceeds_reference"
     };
   }
@@ -219,20 +179,13 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       remark: "Below Standard Reference Limit",
       flag: REMARK_FLAGS.DEFICIENT,
       displayValue: fmtNum(num),
-      ...describeLimit(cfg, "refLimitMin"),
       ruleId: "below_reference"
     };
   }
-  // Nothing was crossed — show whichever range the value actually landed
-  // inside, preferring the Reference Limit range and falling back to the
-  // Detection range, so the reviewer still sees *some* limit context.
   return {
     remark: "Within Acceptable Range",
     flag: REMARK_FLAGS.NORMAL,
     displayValue: fmtNum(num),
-    ...(refLimitMin !== null || refLimitMax !== null
-      ? describeLimit(cfg, ["refLimitMin", "refLimitMax"])
-      : describeLimit(cfg, ["minDetection", "maxDetection"])),
     ruleId: "within_range"
   };
 }
@@ -356,7 +309,7 @@ function SystemRemarkCell({ evaluated, manualRemark, onManualRemarkChange, edita
     },
       evaluated.length > 1 && React.createElement("span", { className: "text-[11px] font-medium", style: { color: C.muted } }, `${ev.name}:`),
       React.createElement(SystemRemarkBadge, { flag: ev.flag, remark: ev.remark }),
-      ev.limitLabel && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `${ev.limitLabel}: ${ev.limitValue}${ev.unit ? ` ${ev.unit}` : ""}`)
+      ev.displayValue && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `(${ev.displayValue}${ev.unit ? ` ${ev.unit}` : ""})`)
     )),
     editable && (
       editing
