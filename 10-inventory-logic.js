@@ -29,6 +29,32 @@ function normalizeGlassware(glassware) {
     ...g
   }));
 }
+// Parameters (Test Configuration › Parameters) — analytical parameters such as
+// Ammonia (NH3), pH, Arsenic, etc. Deliberately decoupled from the "Test Method
+// Engine" fields (chemical/gas requirements, formulas, instrument linking) that
+// live on Test Type — a Parameter is just the definition/reference-limit record
+// that one or more Test Types then link to.
+function normalizeParameters(parameters) {
+  return (parameters || []).map(p => ({
+    id: p.id,
+    code: p.code || "",
+    name: p.name || "",
+    shortName: p.shortName || "",
+    unit: p.unit || "",
+    methodRef: p.methodRef || "",
+    category: p.category || "Others",
+    decimalPlaces: Number.isFinite(Number(p.decimalPlaces)) ? Number(p.decimalPlaces) : 2,
+    lod: p.lod ?? "",
+    loq: p.loq ?? "",
+    tatHours: p.tatHours ?? "",
+    standardFee: p.standardFee ?? "",
+    minDetection: p.minDetection ?? "",
+    maxDetection: p.maxDetection ?? "",
+    refLimitMin: p.refLimitMin ?? "",
+    refLimitMax: p.refLimitMax ?? "",
+    refStandard: p.refStandard || ""
+  }));
+}
 function normalizeEquipment(equipment) {
   return (equipment || []).map(eq => ({
     origin: "",
@@ -138,6 +164,10 @@ function normalizeTestTypes(testTypes) {
       dilutionEnabled: false,
       resultParameters: t.resultParameters || [],
       qcRules: t.qcRules || [],
+      // Many-to-many link to the Parameters sub-tab (Test Configuration ›
+      // Parameters). Stored as a flat array of Parameter ids, same pattern
+      // already used for gasRequirements/chemicalRequirements above.
+      linkedParameterIds: t.linkedParameterIds || [],
       testName: t.testName ?? t.name ?? "",
       method: t.method ?? "",
       ...t,

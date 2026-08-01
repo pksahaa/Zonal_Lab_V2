@@ -80,6 +80,8 @@ const STRINGS = {
     appSub: "Inventory & Test Record Management",
     dashboard: "Dashboard",
     inventory: "Inventory",
+    testConfiguration: "Test Configuration",
+    parameters: "Parameters",
     testTypes: "Test Types",
     addTest: "Add Test Record",
     testRecords: "Test Records",
@@ -93,6 +95,8 @@ const STRINGS = {
     appSub: "ইনভেন্টরি ও টেস্ট রেকর্ড ব্যবস্থাপনা",
     dashboard: "ড্যাশবোর্ড",
     inventory: "ইনভেন্টরি",
+    testConfiguration: "টেস্ট কনফিগারেশন",
+    parameters: "প্যারামিটার",
     testTypes: "টেস্ট টাইপ",
     addTest: "টেস্ট রেকর্ড যোগ করুন",
     testRecords: "টেস্ট রেকর্ড",
@@ -109,6 +113,18 @@ function setLang(l) {
 function t(key) {
   return STRINGS[LANG] && STRINGS[LANG][key] || STRINGS.en[key] || key;
 }
+// ---------------- Parameter categories (Test Configuration › Parameters) ----------------
+// Shared between 12a-parameters-ui.js (form dropdown) and 12-testtypes-ui.js
+// (category badge colouring when a Test Type's linked parameters are listed).
+const PARAMETER_CATEGORIES = ["Physical", "Chemical", "Heavy Metal", "Microbiological", "Radiological", "Others"];
+const PARAMETER_CATEGORY_TONE = {
+  Physical: "info",
+  Chemical: "ok",
+  "Heavy Metal": "warn",
+  Microbiological: "danger",
+  Radiological: "muted",
+  Others: "muted"
+};
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const uid = (p = "id") => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const fmtNum = n => (Math.round((n + Number.EPSILON) * 1000) / 1000).toString();

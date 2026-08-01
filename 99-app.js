@@ -82,6 +82,7 @@ function LabApp({
     setTab("addTest");
   }
   const [invTab, setInvTab] = useState("equipment");
+  const [testConfigTab, setTestConfigTab] = useState("parameters");
   const [reportTab, setReportTab] = useState("executive");
   // Header used to line up 6 always-visible controls (lang, theme, backend
   // settings, lab identity, user pill, logout) — crowded on anything less
@@ -112,6 +113,7 @@ function LabApp({
   const [glassware, setGlassware] = useState([]);
   const [equipment, setEquipment] = useState([]);
   const [gasList, setGasList] = useState([]);
+  const [parameters, setParameters] = useState([]);
   const [testTypes, setTestTypes] = useState([]);
   const [testRecords, setTestRecords] = useState([]);
   const [subBatches, setSubBatches] = useState([]);
@@ -199,7 +201,9 @@ function LabApp({
     setGlassware(normalizeGlassware(loadKey("glassware", seedGlassware())));
     setEquipment(equip);
     setGasList(gases);
-    setTestTypes(normalizeTestTypes(loadKey("testTypes", seedTestTypes(chems, equip, gases))).map(t => ({
+    const params = normalizeParameters(loadKey("parameters", seedParameters()));
+    setParameters(params);
+    setTestTypes(normalizeTestTypes(loadKey("testTypes", seedTestTypes(chems, equip, gases, params))).map(t => ({
       costPerTest: 0,
       ...t
     })));
@@ -222,6 +226,9 @@ function LabApp({
   useEffect(() => {
     if (loaded) saveKey("gasInventory", gasList);
   }, [gasList, loaded]);
+  useEffect(() => {
+    if (loaded) saveKey("parameters", parameters);
+  }, [parameters, loaded]);
   useEffect(() => {
     if (loaded) saveKey("testTypes", testTypes);
   }, [testTypes, loaded]);
@@ -463,9 +470,9 @@ function LabApp({
     label: t("inventory"),
     icon: "flask"
   }, {
-    k: "testTypes",
-    label: t("testTypes"),
-    icon: "beaker"
+    k: "testConfig",
+    label: t("testConfiguration"),
+    icon: "layers"
   }, {
     k: "addTest",
     label: t("addTest"),
@@ -551,7 +558,11 @@ function LabApp({
     testTypes: testTypes,
     testRecords: testRecords,
     notify: notify
-  }), tab === "testTypes" && /*#__PURE__*/React.createElement(TestTypesTab, {
+  }), tab === "testConfig" && /*#__PURE__*/React.createElement(TestConfigurationTab, {
+    testConfigTab: testConfigTab,
+    setTestConfigTab: setTestConfigTab,
+    parameters: parameters,
+    setParameters: setParameters,
     testTypes: testTypes,
     setTestTypes: setTestTypes,
     chemicals: chemicals,
@@ -583,7 +594,10 @@ function LabApp({
     goToSample: goToSample,
     editingRecord: editingRecord,
     onDoneEditing: () => setEditingRecord(null),
-    goToTestTypes: () => setTab("testTypes"),
+    goToTestTypes: () => {
+      setTestConfigTab("testTypes");
+      setTab("testConfig");
+    },
     preselectSubBatchId: entrySubBatchId,
     onPreselectHandled: () => setEntrySubBatchId(undefined)
   }), tab === "testRecords" && /*#__PURE__*/React.createElement(TestRecordsTab, {

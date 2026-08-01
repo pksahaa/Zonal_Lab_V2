@@ -589,6 +589,78 @@ function GasRequirementPicker({
     }), g.name);
   }));
 }
+// ---- Parameter linker: many-to-many attach/detach between a Test Type and
+// the Parameters sub-tab (Test Configuration › Parameters). Checkbox-list
+// with search — attaches/detaches by id, and lets the order be seen at a
+// glance via the "selected" chip row above the list. ----
+function ParameterLinker({
+  parameters,
+  selectedIds,
+  setSelectedIds
+}) {
+  const [q, setQ] = useState("");
+  const selected = (selectedIds || []).map(id => parameters.find(p => p.id === id)).filter(Boolean);
+  const query = q.trim().toLowerCase();
+  const filtered = parameters.filter(p => !query || [p.code, p.name, p.shortName].some(v => (v || "").toLowerCase().includes(query)));
+  function toggle(id) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function remove(id) {
+    setSelectedIds(prev => prev.filter(x => x !== id));
+  }
+  if (parameters.length === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "text-xs p-2 rounded flex items-center gap-1.5",
+      style: { background: C.warnBg, color: C.warn }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "warning", size: 13 }), "No parameters defined yet — add some in Test Configuration \u203a Parameters first, then come back to link them here.");
+  }
+  const listBody = filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "text-xs p-2",
+    style: { color: C.muted }
+  }, "No parameters match.") : filtered.map(p => /*#__PURE__*/React.createElement("label", {
+    key: p.id,
+    className: "flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer",
+    style: { borderTop: `1px solid ${C.border}` }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: (selectedIds || []).includes(p.id),
+    onChange: () => toggle(p.id)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold",
+    style: { color: C.ink }
+  }, p.code), /*#__PURE__*/React.createElement("span", {
+    style: { color: C.muted }
+  }, "— ", p.name, p.unit ? ` (${p.unit})` : "")));
+  return /*#__PURE__*/React.createElement("div", { className: "flex flex-col gap-2" },
+    selected.length > 0 && /*#__PURE__*/React.createElement("div", { className: "flex flex-wrap gap-1.5" },
+      selected.map(p => /*#__PURE__*/React.createElement("span", {
+        key: p.id,
+        className: "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold",
+        style: { background: C.okBg, color: C.ok }
+      }, p.code || p.name, /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        onClick: () => remove(p.id),
+        "aria-label": `Remove ${p.name}`,
+        className: "ml-0.5"
+      }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 10 }))))),
+    selected.length === 0 && /*#__PURE__*/React.createElement("div", { className: "text-xs", style: { color: C.muted } }, "No parameters linked yet — tick from the list below."),
+    /*#__PURE__*/React.createElement("label", {
+      className: "flex items-center gap-1.5 text-xs",
+      style: { color: C.muted }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "search", size: 13 }),
+      /*#__PURE__*/React.createElement("input", {
+        value: q,
+        onChange: e => setQ(e.target.value),
+        placeholder: "Search parameters to attach…",
+        className: "border rounded px-2 py-1 text-xs w-56",
+        style: { borderColor: C.border }
+      })),
+    /*#__PURE__*/React.createElement("div", {
+      className: "rounded max-h-48 overflow-y-auto",
+      style: { border: `1px solid ${C.border}` }
+    }, listBody)
+  );
+}
 function CollapsibleSection({
   step,
   title,
@@ -1051,12 +1123,14 @@ function TestTypeBuilder({
   notify,
   equipment,
   gasList,
+  parameters,
   onSave,
   onCancel,
   initial
 }) {
   const [testName, setTestName] = useState(initial?.testName || "");
   const [method, setMethod] = useState(initial?.method || "");
+  const [linkedParameterIds, setLinkedParameterIds] = useState(initial?.linkedParameterIds || []);
   const [costPerTest, setCostPerTest] = useState(initial ? String(initial.costPerTest ?? 0) : "");
   // Submit-guard: onSave() is synchronous, but a fast double-click can still
   // fire it twice before React disables the button — this ref stops it cold.
@@ -1106,6 +1180,7 @@ function TestTypeBuilder({
       name: combinedName || testName.trim(),
       costPerTest: Number(costPerTest) || 0,
       defaultEquipmentId,
+      linkedParameterIds,
       chemicalRequirements,
       gasRequirements,
       dilutionEnabled,
@@ -1181,6 +1256,15 @@ function TestTypeBuilder({
     name: "warning",
     size: 13
   }), "No equipment in inventory yet — you can still save this test type and set equipment later.")), /*#__PURE__*/React.createElement(CollapsibleSection, {
+    step: "P",
+    title: "Linked Parameters",
+    subtitle: "Attach one or more Parameters (from Test Configuration \u203a Parameters) that this Test Type reports",
+    defaultOpen: linkedParameterIds.length > 0
+  }, /*#__PURE__*/React.createElement(ParameterLinker, {
+    parameters: parameters || [],
+    selectedIds: linkedParameterIds,
+    setSelectedIds: setLinkedParameterIds
+  })), /*#__PURE__*/React.createElement(CollapsibleSection, {
     step: 2,
     title: "Chemical Requirement",
     subtitle: "Which chemicals this test consumes from inventory, and how much",
@@ -1308,7 +1392,18 @@ function TestTypeBuilder({
 // ============================================================================
 // TEST TYPES TAB — create/manage test type designs (moved out of Add Test Record)
 // ============================================================================
-function TestTypesTab({
+// ============================================================================
+// TEST CONFIGURATION TAB — top-level shell for the renamed "Test Type"
+// module. Two sub-tabs: Parameters (lightweight analytical-parameter master
+// list) and Test Types (the existing Test Method Engine, now also able to
+// link Parameters). Mirrors the pill sub-nav pattern already used by
+// InventoryTab (Equipment/Glassware/Chemicals/Gas).
+// ============================================================================
+function TestConfigurationTab({
+  testConfigTab,
+  setTestConfigTab,
+  parameters,
+  setParameters,
   testTypes,
   setTestTypes,
   chemicals,
@@ -1322,6 +1417,62 @@ function TestTypesTab({
   testRecords,
   notify
 }) {
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-2 mb-5" },
+      [{ k: "parameters", label: "Parameters", icon: "list" }, { k: "testTypes", label: "Test Types", icon: "beaker" }].map(s =>
+        /*#__PURE__*/React.createElement("button", {
+          key: s.k,
+          onClick: () => setTestConfigTab(s.k),
+          className: "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium",
+          style: {
+            background: testConfigTab === s.k ? C.teal : "#fff",
+            color: testConfigTab === s.k ? "#fff" : C.muted,
+            border: `1px solid ${testConfigTab === s.k ? C.teal : C.border}`
+          }
+        }, /*#__PURE__*/React.createElement(Icon, { name: s.icon, size: 14 }), s.label))
+    ),
+    testConfigTab === "parameters" && /*#__PURE__*/React.createElement(ParametersTab, {
+      parameters: parameters,
+      setParameters: setParameters,
+      testTypes: testTypes,
+      notify: notify
+    }),
+    testConfigTab === "testTypes" && /*#__PURE__*/React.createElement(TestTypesTab, {
+      testTypes: testTypes,
+      setTestTypes: setTestTypes,
+      chemicals: chemicals,
+      setChemicals: setChemicals,
+      equipment: equipment,
+      setEquipment: setEquipment,
+      gasList: gasList,
+      setGasList: setGasList,
+      masterChemicals: masterChemicals,
+      setMasterChemicals: setMasterChemicals,
+      parameters: parameters,
+      testRecords: testRecords,
+      notify: notify
+    })
+  );
+}
+
+function TestTypesTab({
+  testTypes,
+  setTestTypes,
+  chemicals,
+  setChemicals,
+  equipment,
+  setEquipment,
+  gasList,
+  setGasList,
+  masterChemicals,
+  setMasterChemicals,
+  parameters,
+  testRecords,
+  notify
+}) {
+  function parameterSummary(t) {
+    return (t.linkedParameterIds || []).map(id => (parameters || []).find(p => p.id === id)).filter(Boolean);
+  }
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingType, setEditingType] = useState(null);
   const [deleteFor, setDeleteFor] = useState(null);
@@ -1555,6 +1706,7 @@ function TestTypesTab({
         costPerTest: Number(d.costPerTest) || 0,
         feeApplicable: d.feeApplicable !== false,
         defaultEquipmentId: machine?.id || "",
+        linkedParameterIds: [],
         chemicalRequirements,
         gasRequirements,
         dilutionEnabled: !!d.dilutionEnabled,
@@ -1954,7 +2106,7 @@ function TestTypesTab({
     style: {
       background: C.bg
     }
-  }, ["Test Type", "Method", "Cost / Sample", "Default Equipment", "Requirements", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Test Type", "Method", "Cost / Sample", "Default Equipment", "Linked Parameters", "Requirements", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     className: "text-left px-3 py-2.5 text-xs font-semibold sticky top-0",
     style: {
@@ -2007,6 +2159,20 @@ function TestTypesTab({
       }
     }, t.defaultEquipmentId ? equipmentName(t.defaultEquipmentId) : "—"), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-2.5"
+    }, (() => {
+      const linked = parameterSummary(t);
+      return linked.length === 0 ? /*#__PURE__*/React.createElement("span", {
+        style: { color: C.muted }
+      }, "—") : /*#__PURE__*/React.createElement("div", {
+        className: "flex items-center gap-1 flex-wrap"
+      }, linked.slice(0, 3).map(p => /*#__PURE__*/React.createElement(Badge, {
+        key: p.id,
+        tone: PARAMETER_CATEGORY_TONE[p.category] || "muted"
+      }, p.code || p.name)), linked.length > 3 && /*#__PURE__*/React.createElement(Badge, {
+        tone: "muted"
+      }, "+", linked.length - 3, " more"));
+    })()), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2.5"
     }, reqCount === 0 ? /*#__PURE__*/React.createElement(Badge, {
       tone: "muted"
     }, "Entry / revenue only") : /*#__PURE__*/React.createElement("div", {
@@ -2041,7 +2207,7 @@ function TestTypesTab({
     const detailRow = !isOpen ? null : /*#__PURE__*/React.createElement("tr", {
       key: t.id + "-detail"
     }, /*#__PURE__*/React.createElement("td", {
-      colSpan: 6,
+      colSpan: 7,
       className: "px-4 py-3",
       style: {
         background: `${C.teal}0F`,
@@ -2060,7 +2226,11 @@ function TestTypesTab({
       style: {
         color: C.ink
       }
-    }, t.testName || t.name))), /*#__PURE__*/React.createElement("div", {
+    }, t.testName || t.name)), /*#__PURE__*/React.createElement("span", null, "Linked Parameters: ", /*#__PURE__*/React.createElement("strong", {
+      style: {
+        color: C.ink
+      }
+    }, parameterSummary(t).length === 0 ? "none" : parameterSummary(t).map(p => p.name).join(", ")))), /*#__PURE__*/React.createElement("div", {
       className: "text-xs",
       style: {
         color: C.muted
@@ -2107,6 +2277,7 @@ function TestTypesTab({
     notify: notify,
     equipment: equipment,
     gasList: gasList,
+    parameters: parameters,
     onSave: handleSave,
     onCancel: () => setShowBuilder(false)
   })), editingType && /*#__PURE__*/React.createElement(Modal, {
@@ -2121,6 +2292,7 @@ function TestTypesTab({
     notify: notify,
     equipment: equipment,
     gasList: gasList,
+    parameters: parameters,
     initial: editingType,
     onSave: handleSave,
     onCancel: () => setEditingType(null)
