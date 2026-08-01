@@ -97,14 +97,24 @@ function AddTestTab({
   // Samples that still need test records logged against them (registered through
   // in_progress, i.e. not yet at results/review/approval/release).
   const pendingSubBatches = (subBatches || []).filter(sb => sb.status === "pending");
+  // Editing an existing Analytical Batch record: that batch's status is no
+  // longer "pending" (it flipped to "tested" the moment this record was
+  // first saved), so looking it up only inside pendingSubBatches — as the
+  // fresh-entry flow does — always came back null. That's what left the
+  // Calculated Result table with no member samples to show in edit mode.
+  // Resolve against the full subBatches list instead so an already-tested
+  // batch still resolves once its record is opened for editing.
+  const selectedSubBatch = (subBatches || []).find(sb => sb.id === selectedSubBatchId) || null;
+  // Make sure the batch being edited still appears as an option in the
+  // picker (it won't be in pendingSubBatches any more), so the dropdown
+  // visibly shows the right selection instead of looking empty.
+  const subBatchPickerOptions = selectedSubBatch && !pendingSubBatches.some(sb => sb.id === selectedSubBatch.id) ? [selectedSubBatch, ...pendingSubBatches] : pendingSubBatches;
   // Samples that still have at least one requested parameter genuinely
   // pending (not yet resulted, not already queued in a pending sub-batch
   // for that specific parameter) — computed per (sample, testType) pair via
   // pendingTestTypeIdsForSample, NOT off the sample's single overall
   // `status` field. A sample with 3 requested parameters where only 1 is
   // done must still show up here for the other 2.
-  const selectedSubBatch = pendingSubBatches.find(sb => sb.id === selectedSubBatchId) || null;
-
   // ---- Batch (Reference) mode — pick a Reference, then a Test Type it
   // still needs; the matching samples get bundled into a real Sub-Batch
   // behind the scenes (see useReferenceAsSubBatch below) so everything
@@ -469,6 +479,38 @@ function AddTestTab({
           [editingRecord.sampleId]: editingRecord.results
         });
       }
+      // Re-link this record to its Analytical Batch and switch the picker
+      // into "Existing Analytical Batch" mode — without this, selectionMode
+      // stayed on whatever it last was (default "batch") and
+      // selectedSubBatchId stayed blank, so selectedSubBatch never resolved
+      // and the Calculated Result table had no member samples to show.
+      if (editingRecord.subBatchId) {
+        setSelectionMode("subbatch");
+        setSelectedSubBatchId(editingRecord.subBatchId);
+      }
+      // Restore each member's raw readings (so they stay editable and
+      // recompute exactly as before) or, for results that came from a bulk
+      // Excel upload (identifiable by having no raw inputs recorded), the
+      // finished value as an override — otherwise the batch table would
+      // load with every row blank even though the record has real results.
+      if (editingRecord.memberResults && editingRecord.memberResults.length) {
+        const nextMemberInputs = {};
+        const nextOverrides = {};
+        editingRecord.memberResults.forEach(m => {
+          (m.results || []).forEach(r => {
+            if (r.inputs && Object.keys(r.inputs).length > 0) {
+              nextMemberInputs[m.sampleId] = {
+                ...(nextMemberInputs[m.sampleId] || {}),
+                [r.paramId]: r.inputs
+              };
+            } else if (r.value != null || r.error) {
+              nextOverrides[m.sampleId] = [...(nextOverrides[m.sampleId] || []), r];
+            }
+          });
+        });
+        setMemberInputs(nextMemberInputs);
+        setResultOverridesBySample(prev => ({ ...prev, ...nextOverrides }));
+      }
     }
   }, [editingRecord]);
 
@@ -627,6 +669,8 @@ function AddTestTab({
     setBracketingPoints([]);
     setResultOverridesBySample({});
     setMemberInputs({});
+    setSelectionMode("batch");
+    setSelectedSubBatchId("");
   }
   function handleCancelEdit() {
     resetForm();
@@ -1219,6 +1263,7 @@ function AddTestTab({
     className: "border rounded px-2 py-1.5 text-sm",
     style: { borderColor: C.border },
     value: selectionMode,
+    disabled: !!editingRecord,
     onChange: e => {
       const mode = e.target.value;
       setSelectionMode(mode);
@@ -1235,8 +1280,9 @@ function AddTestTab({
     className: "border rounded px-2 py-1.5 text-sm",
     style: { borderColor: C.border },
     value: selectedSubBatchId,
+    disabled: !!editingRecord,
     onChange: e => setSelectedSubBatchId(e.target.value)
-  }, [/*#__PURE__*/React.createElement("option", { key: "none", value: "" }, "— No sub-batch —")].concat(pendingSubBatches.map(sb => /*#__PURE__*/React.createElement("option", {
+  }, [/*#__PURE__*/React.createElement("option", { key: "none", value: "" }, "— No sub-batch —")].concat(subBatchPickerOptions.map(sb => /*#__PURE__*/React.createElement("option", {
     key: sb.id,
     value: sb.id
   }, `${sb.label} — ${sb.testTypeName} (${sb.memberSampleIds.length} samples)`)))));
