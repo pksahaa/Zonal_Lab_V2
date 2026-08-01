@@ -887,7 +887,19 @@ function ResultParameterEditor({
     style: {
       color: C.muted
     }
-  }, "Use the variable keys above (case-sensitive). Supported: + − × ÷ ^ ( ) and functions abs(), round(x,d), min(), max(), sqrt(), log10(), ln()."), /*#__PURE__*/React.createElement(FormulaTryIt, {
+  }, "Use the variable keys above (case-sensitive). Supported: + − × ÷ ^ ( ) and functions abs(), round(x,d), min(), max(), sqrt(), log10(), ln()."), !p.formula.trim() && p.inputs.length === 1 && /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] mt-1 p-1.5 rounded",
+    style: {
+      background: C.infoBg,
+      color: C.info
+    }
+  }, "Left blank with a single input — the raw reading entered in Add Test Record will be used as the result as-is (no conversion)."), !p.formula.trim() && p.inputs.length > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] mt-1 p-1.5 rounded",
+    style: {
+      background: C.warnBg,
+      color: C.warn
+    }
+  }, "A formula is required here — with ", p.inputs.length, " inputs there's no single value to fall back to. Add Test Record will show \"No formula set\" until one is added."), /*#__PURE__*/React.createElement(FormulaTryIt, {
     param: p
   }))), /*#__PURE__*/React.createElement(Button, {
     size: "sm",
@@ -914,7 +926,11 @@ function FormulaTryIt({
   param.inputs.forEach(inp => {
     variables[inp.key] = testValues[inp.id] !== undefined && testValues[inp.id] !== "" ? Number(testValues[inp.id]) : 0;
   });
-  const result = param.formula.trim() ? evaluateFormula(param.formula, variables) : null;
+  const hasSingleInputPassthrough = !param.formula.trim() && param.inputs.length === 1;
+  const result = param.formula.trim() ? evaluateFormula(param.formula, variables) : hasSingleInputPassthrough ? {
+    ok: true,
+    value: variables[param.inputs[0].key]
+  } : null;
   return /*#__PURE__*/React.createElement("div", {
     className: "mt-2 p-2 rounded",
     style: {

@@ -201,10 +201,35 @@ function AddTestTab({
       }
     }));
   }
+  // ---- Formula resolution for a single (individual) sample's Calculated
+  // Result. If the lab never wrote a formula for this parameter — the
+  // common case being a single direct-read input (a meter that already
+  // shows the final value, e.g. a pH meter or a colorimeter readout) —
+  // treat that one raw reading AS the result instead of reporting
+  // "No formula defined." forever. This only fires once that one input has
+  // actually been typed (not just defaulted to 0), so an untouched field
+  // still shows nothing rather than a false 0. Parameters with zero or
+  // more than one input still require an explicit formula, since there's
+  // no unambiguous way to guess how they combine. ----
   function computeResult(param) {
+    const raw = resultInputs[param.id] || {};
+    if (!(param.formula || "").trim() && param.inputs.length === 1) {
+      const onlyKey = param.inputs[0].key;
+      const typed = raw[onlyKey];
+      if (typed !== undefined && typed !== "" && typed !== null && Number.isFinite(Number(typed))) {
+        return {
+          ok: true,
+          value: +Number(typed).toFixed(param.roundTo ?? 2)
+        };
+      }
+      return {
+        ok: false,
+        error: "No formula defined."
+      };
+    }
     const vars = {};
     param.inputs.forEach(inp => {
-      vars[inp.key] = Number((resultInputs[param.id] || {})[inp.key]) || 0;
+      vars[inp.key] = Number(raw[inp.key]) || 0;
     });
     const res = evaluateFormula(param.formula, vars);
     return res.ok ? {
@@ -265,10 +290,30 @@ function AddTestTab({
       }
     }));
   }
+  // Same identity fallback as computeResult() above, but for a member
+  // sample inside an Analytical Batch — this is the function behind the
+  // "Calculated Result" column that was showing "—" / Incomplete for
+  // manually-typed raw readings whenever the parameter had no formula
+  // configured.
   function computeMemberResult(sampleId, param) {
+    const raw = memberInputs[sampleId]?.[param.id] || {};
+    if (!(param.formula || "").trim() && param.inputs.length === 1) {
+      const onlyKey = param.inputs[0].key;
+      const typed = raw[onlyKey];
+      if (typed !== undefined && typed !== "" && typed !== null && Number.isFinite(Number(typed))) {
+        return {
+          ok: true,
+          value: +Number(typed).toFixed(param.roundTo ?? 2)
+        };
+      }
+      return {
+        ok: false,
+        error: "No formula defined."
+      };
+    }
     const vars = {};
     param.inputs.forEach(inp => {
-      vars[inp.key] = Number(memberInputs[sampleId]?.[param.id]?.[inp.key]) || 0;
+      vars[inp.key] = Number(raw[inp.key]) || 0;
     });
     const res = evaluateFormula(param.formula, vars);
     return res.ok ? {
@@ -290,6 +335,13 @@ function AddTestTab({
     });
     if (!hasAnyInput) return { label: "Pending", bg: `${C.muted}1A`, fg: C.muted };
     if (res.ok) return { label: "Entered", bg: C.okBg, fg: C.ok };
+    // Genuinely missing formula config (2+ inputs need one to combine them,
+    // vs. the single-input case which now auto-resolves in
+    // computeMemberResult above) — call this out distinctly from a normal
+    // in-progress row so it's obvious the fix is in Test Types, not here.
+    if (res.error === "No formula defined." && p.inputs.length > 1) {
+      return { label: "No formula set", bg: C.warnBg, fg: C.warn };
+    }
     return { label: "Incomplete", bg: C.warnBg, fg: C.warn };
   }
   function renderCalcResultRow(sampleId, p, rowIdx) {
