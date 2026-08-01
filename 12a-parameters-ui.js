@@ -293,33 +293,33 @@ function ParametersTab({
   const pageRows = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
 
   return /*#__PURE__*/React.createElement("div", null,
-    /*#__PURE__*/React.createElement("div", { className: "flex items-center justify-between mb-4 flex-wrap gap-2" },
-      /*#__PURE__*/React.createElement("div", { className: "text-sm", style: { color: C.muted } },
-        "Define analytical parameters here (code, name, unit, method reference, category, and optional limits). Link them to one or more Test Types in the Test Types sub-tab."),
+    /*#__PURE__*/React.createElement("div", { className: "text-sm mb-3", style: { color: C.muted } },
+      "Define analytical parameters here (code, name, unit, method reference, category, and optional limits). Link them to one or more Test Types in the Test Types sub-tab."),
+    /*#__PURE__*/React.createElement("div", { className: "flex items-center justify-between mb-3 flex-wrap gap-2" },
+      /*#__PURE__*/React.createElement("div", { className: "flex gap-2 flex-wrap items-center" },
+        /*#__PURE__*/React.createElement("label", {
+          className: "flex items-center gap-1.5 text-xs",
+          style: { color: C.muted }
+        }, /*#__PURE__*/React.createElement(Icon, { name: "search", size: 13 }),
+          /*#__PURE__*/React.createElement("input", {
+            value: search,
+            onChange: e => { setSearch(e.target.value); setPage(1); },
+            placeholder: "Search code, name, method ref…",
+            className: "border rounded px-2 py-1 text-xs w-56",
+            style: { borderColor: C.border }
+          })),
+        /*#__PURE__*/React.createElement("select", {
+          value: categoryFilter,
+          onChange: e => { setCategoryFilter(e.target.value); setPage(1); },
+          className: "border rounded px-2 py-1 text-xs",
+          style: { borderColor: C.border, color: C.ink }
+        }, /*#__PURE__*/React.createElement("option", { value: "" }, "All categories"),
+           PARAMETER_CATEGORIES.map(cat => /*#__PURE__*/React.createElement("option", { key: cat, value: cat }, cat)))
+      ),
       /*#__PURE__*/React.createElement(Button, {
         size: "sm",
         onClick: openAdd
       }, /*#__PURE__*/React.createElement(Icon, { name: "plus", size: 14 }), "+ Add Parameter")
-    ),
-    /*#__PURE__*/React.createElement("div", { className: "flex gap-2 flex-wrap items-center mb-3" },
-      /*#__PURE__*/React.createElement("label", {
-        className: "flex items-center gap-1.5 text-xs",
-        style: { color: C.muted }
-      }, /*#__PURE__*/React.createElement(Icon, { name: "search", size: 13 }),
-        /*#__PURE__*/React.createElement("input", {
-          value: search,
-          onChange: e => { setSearch(e.target.value); setPage(1); },
-          placeholder: "Search code, name, method ref…",
-          className: "border rounded px-2 py-1 text-xs w-56",
-          style: { borderColor: C.border }
-        })),
-      /*#__PURE__*/React.createElement("select", {
-        value: categoryFilter,
-        onChange: e => { setCategoryFilter(e.target.value); setPage(1); },
-        className: "border rounded px-2 py-1 text-xs",
-        style: { borderColor: C.border, color: C.ink }
-      }, /*#__PURE__*/React.createElement("option", { value: "" }, "All categories"),
-         PARAMETER_CATEGORIES.map(cat => /*#__PURE__*/React.createElement("option", { key: cat, value: cat }, cat)))
     ),
     filtered.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
       icon: "beaker",

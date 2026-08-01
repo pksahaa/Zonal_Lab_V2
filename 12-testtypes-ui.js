@@ -1145,6 +1145,22 @@ function TestTypeBuilder({
   const [qcRules, setQcRules] = useState(initial?.qcRules || []);
   const [qcFrequency, setQcFrequency] = useState(initial?.qcFrequency ? String(initial.qcFrequency) : "");
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  // Cost is defined once on the Parameter (Standard Fee, in Test
+  // Configuration › Parameters) — so instead of re-typing it here, the
+  // Test Type's Cost of Test auto-fills as the sum of the linked
+  // parameters' Standard Fee every time the selection changes. Still a
+  // normal editable field afterwards, in case this test type's price
+  // should differ from the sum (e.g. a discounted package).
+  React.useEffect(() => {
+    if (linkedParameterIds.length === 0) return;
+    const sum = linkedParameterIds.reduce((total, id) => {
+      const p = (parameters || []).find(x => x.id === id);
+      const fee = Number(p?.standardFee);
+      return total + (Number.isFinite(fee) ? fee : 0);
+    }, 0);
+    setCostPerTest(String(sum));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedParameterIds, parameters]);
   const chemOptions = {
     raw: chemicals,
     options: chemicals.map(c => ({
@@ -1206,8 +1222,18 @@ function TestTypeBuilder({
   }), "Please fix the highlighted field(s) below before saving."), /*#__PURE__*/React.createElement(CollapsibleSection, {
     step: 1,
     title: "Basic Info",
-    subtitle: "Name, method, cost & default equipment"
-  }, /*#__PURE__*/React.createElement("div", {
+    subtitle: "Select the parameter(s) this test type covers, then name, cost & default equipment"
+  }, /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", {
+      className: "text-xs font-semibold mb-1.5",
+      style: { color: C.ink }
+    }, "Parameter(s) this Test Type reports"),
+    /*#__PURE__*/React.createElement(ParameterLinker, {
+      parameters: parameters || [],
+      selectedIds: linkedParameterIds,
+      setSelectedIds: setLinkedParameterIds
+    })
+  ), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-2 gap-3"
   }, /*#__PURE__*/React.createElement(TextField, {
     label: "Name of Test",
@@ -1234,7 +1260,13 @@ function TestTypeBuilder({
     onChange: e => setCostPerTest(e.target.value),
     placeholder: "e.g. 100 — use 0 for free tests",
     error: errors.costPerTest
-  }), /*#__PURE__*/React.createElement("div", {
+  }), linkedParameterIds.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs p-2 rounded",
+    style: {
+      background: C.okBg,
+      color: C.ok
+    }
+  }, "Auto-filled from the Standard Fee set on the linked parameter(s) — adjust the number above if this test type should cost something different."), /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded",
     style: {
       background: C.infoBg,
@@ -1256,15 +1288,6 @@ function TestTypeBuilder({
     name: "warning",
     size: 13
   }), "No equipment in inventory yet — you can still save this test type and set equipment later.")), /*#__PURE__*/React.createElement(CollapsibleSection, {
-    step: "P",
-    title: "Linked Parameters",
-    subtitle: "Attach one or more Parameters (from Test Configuration \u203a Parameters) that this Test Type reports",
-    defaultOpen: linkedParameterIds.length > 0
-  }, /*#__PURE__*/React.createElement(ParameterLinker, {
-    parameters: parameters || [],
-    selectedIds: linkedParameterIds,
-    setSelectedIds: setLinkedParameterIds
-  })), /*#__PURE__*/React.createElement(CollapsibleSection, {
     step: 2,
     title: "Chemical Requirement",
     subtitle: "Which chemicals this test consumes from inventory, and how much",
