@@ -1210,7 +1210,7 @@ function TestTypeBuilder({
   const errors = {};
   if (submitAttempted) {
     if (!testName.trim()) errors.testName = "Test Name is required.";
-    if (costPerTest === "") errors.costPerTest = "Cost of Test is required.";
+    if (costPerTest === "") errors.costPerTest = "Standard Fee (per test) is required.";
     if (chemicalRequirements.some(r => !r.chemicalId)) errors.chemicalRequirements = "Every Chemical Requirement row needs a linked chemical selected (or remove the empty row).";
     if (dilutionEnabled && dilutionChemicalRequirements.some(r => !r.chemicalId)) errors.dilutionChemicalRequirements = "Every Dilution Chemical Requirement row needs a linked chemical selected (or remove the empty row).";
   }
@@ -1298,7 +1298,7 @@ function TestTypeBuilder({
       color: C.ok
     }
   }, "This test type will be saved as: ", /*#__PURE__*/React.createElement("strong", null, combinedName)), /*#__PURE__*/React.createElement(TextField, {
-    label: "Cost of Test (৳ per billed sample)",
+    label: fieldsLocked ? "Standard Fee (per test) — locked, from Parameter" : "Standard Fee (per test)",
     type: "number",
     min: "0",
     value: costPerTest,
@@ -1313,7 +1313,7 @@ function TestTypeBuilder({
       background: C.okBg,
       color: C.ok
     }
-  }, "Auto-filled from the Standard Fee set on the linked parameter — unlink the parameter above if this test type needs a different name, method, or cost."), /*#__PURE__*/React.createElement("div", {
+  }, "Auto-filled from the Standard Fee set on the linked parameter — unlink the parameter above if this test type needs a different name, method, or fee."), /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded",
     style: {
       background: C.infoBg,
@@ -2189,13 +2189,13 @@ function TestTypesTab({
   const ttPageClamped = Math.min(ttPage, ttTotalPages);
   const ttPageRows = ttFiltered.slice((ttPageClamped - 1) * TT_PAGE_SIZE, ttPageClamped * TT_PAGE_SIZE);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between mb-4 flex-wrap gap-2"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-sm",
+    className: "text-sm mb-2",
     style: {
       color: C.muted
     }
   }, "Design test types here — equipment, chemical/gas requirements, dummy defaults, and cost. \"Add Test Record\" simply loads whatever is designed here."), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 flex-wrap items-center"
   }, /*#__PURE__*/React.createElement("label", {
     className: "flex items-center gap-1.5 text-xs",
@@ -2259,7 +2259,7 @@ function TestTypesTab({
     style: {
       background: C.bg
     }
-  }, ["Test Type", "Method", "Cost / Sample", "Default Equipment", "Linked Parameters", "Requirements", ""].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Test Type", "Method", "Standard Fee", "Default Equipment", "Linked Parameters", "Requirements", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     className: "text-left px-3 py-2.5 text-xs font-semibold sticky top-0",
     style: {
@@ -2271,6 +2271,8 @@ function TestTypesTab({
   }, h)))), /*#__PURE__*/React.createElement("tbody", null, ttPageRows.map((t, idx) => {
     const isOpen = !!ttExpanded[t.id];
     const reqCount = (t.chemicalRequirements || []).length + (t.gasRequirements || []).length;
+    const linkedFeeParam = (t.linkedParameterIds || []).length > 0 ? (parameters || []).find(p => p.id === t.linkedParameterIds[0]) : null;
+    const liveCost = linkedFeeParam ? Number(linkedFeeParam.standardFee) || 0 : Number(t.costPerTest) || 0;
     const mainRow = /*#__PURE__*/React.createElement("tr", {
       key: t.id,
       className: "cursor-pointer",
@@ -2305,7 +2307,7 @@ function TestTypesTab({
       className: "px-3 py-2.5"
     }, /*#__PURE__*/React.createElement(Badge, {
       tone: "info"
-    }, "৳", fmtNum(t.costPerTest || 0), "/sample")), /*#__PURE__*/React.createElement("td", {
+    }, "৳", fmtNum(liveCost), "/sample")), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-2.5",
       style: {
         color: C.muted

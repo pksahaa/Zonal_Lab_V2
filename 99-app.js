@@ -579,6 +579,7 @@ function LabApp({
     notify: notify
   }), tab === "addTest" && /*#__PURE__*/React.createElement(AddTestTab, {
     testTypes: testTypes,
+    parameters: parameters,
     chemicals: chemicals,
     setChemicals: setChemicals,
     equipment: equipment,

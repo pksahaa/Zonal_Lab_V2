@@ -343,7 +343,7 @@ function StageQueueBody({ stage, groups, testRecords, subBatches, testTypes, par
   const rows = React.useMemo(() => flattenStageGroups(groups), [groups]);
   if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, emptyText);
   return E("div", null,
-    E(StageViewToggle, { viewMode, setViewMode }),
+    E("div", { className: "flex justify-end" }, E(StageViewToggle, { viewMode, setViewMode })),
     viewMode === "flat"
       ? E(FlatStageTable, { rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })
       : E(BatchStageTable, { rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })

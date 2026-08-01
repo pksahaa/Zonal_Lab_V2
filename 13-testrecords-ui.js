@@ -8,6 +8,7 @@
 // ============================================================================
 function AddTestTab({
   testTypes,
+  parameters,
   chemicals,
   setChemicals,
   equipment,
@@ -636,7 +637,20 @@ function AddTestTab({
       unit: g.unit
     };
   }
-  const unitCost = selectedTest ? Number(selectedTest.costPerTest) || 0 : 0;
+  // Cost / Sample for a linked Test Type is meant to always mirror its
+  // parameter's Standard Fee (per test) — Test Type Builder auto-fills it at
+  // save time, but that's a snapshot: if the fee is edited on the Parameter
+  // afterwards, a stored (now-stale) testType.costPerTest would silently
+  // keep billing the OLD number here. Look the current parameter fee up
+  // live instead whenever one is linked, so Standard Fee and Cost / Sample
+  // can never drift apart; fall back to the stored value only for
+  // legacy/unlinked test types that have no parameter to defer to.
+  const linkedFeeParam = selectedTest && (selectedTest.linkedParameterIds || []).length > 0
+    ? (parameters || []).find(p => p.id === selectedTest.linkedParameterIds[0])
+    : null;
+  const unitCost = linkedFeeParam
+    ? Number(linkedFeeParam.standardFee) || 0
+    : selectedTest ? Number(selectedTest.costPerTest) || 0 : 0;
   // Fee applicability is decided per record (not fixed to the test type), and only Field Samples are billed —
   // standard/QC samples are for verifying the test's own accuracy and aren't charged to anyone. No. of
   // Samples Requiring Dilution never enters this calculation — dilution is inventory-only.

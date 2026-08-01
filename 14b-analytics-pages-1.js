@@ -1155,7 +1155,7 @@ function RevenueAnalyticsPage({
       label: "Billed Samples"
     }, {
       key: "unitCost",
-      label: "Cost/Sample",
+      label: "Standard Fee",
       render: r => fmtMoney(r.unitCost)
     }, {
       key: "revenue",
