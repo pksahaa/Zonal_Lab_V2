@@ -1699,6 +1699,117 @@ function ImportTestPickerModal({
   }), saving ? "Importing…" : `Import ${rowCount} Sample(s)`)));
 }
 
+// ---- Sample Registration table: column catalog for the "Columns" show/hide
+// dropdown. `key` order here is also the left-to-right render order.
+// `locked: true` columns (Tracking No. and Actions) can never be hidden, so
+// there's always at least an identifier and a way to act on each row.
+const SAMPLE_TABLE_COLUMNS = [
+  { key: "sampleCode", label: "Sample Code" },
+  { key: "refNo", label: "Ref / Memo No." },
+  { key: "trackingNo", label: "Tracking No.", locked: true },
+  { key: "clientContact", label: "Client" },
+  { key: "customerName", label: "Customer Name" },
+  { key: "site", label: "Site Name/Village" },
+  { key: "district", label: "District" },
+  { key: "upazila", label: "Upazilla" },
+  { key: "ward", label: "Ward/Union" },
+  { key: "sampleType", label: "Sample Type" },
+  { key: "latLong", label: "Lat/Long" },
+  { key: "waterPointType", label: "Type of Water Point" },
+  { key: "priority", label: "Priority" },
+  { key: "registrationDate", label: "Registration Date" },
+  { key: "status", label: "Status" },
+  { key: "assignedTo", label: "Assigned To" },
+  { key: "actions", label: "Actions", locked: true }
+];
+const SAMPLE_TABLE_COLUMNS_STORAGE_KEY = "dphe_lims_sample_columns_v1";
+function loadSampleColumnPrefs() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(SAMPLE_TABLE_COLUMNS_STORAGE_KEY) || "null");
+  } catch (e) {
+    stored = null;
+  }
+  const prefs = {};
+  SAMPLE_TABLE_COLUMNS.forEach(c => {
+    prefs[c.key] = c.locked ? true : stored && Object.prototype.hasOwnProperty.call(stored, c.key) ? !!stored[c.key] : true;
+  });
+  return prefs;
+}
+function saveSampleColumnPrefs(prefs) {
+  try {
+    localStorage.setItem(SAMPLE_TABLE_COLUMNS_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (e) {
+    /* localStorage unavailable (private mode, quota, etc.) — preference just won't persist */
+  }
+}
+
+// ---- "Columns" show/hide dropdown button, used above the Sample
+// Registration table. ----
+function ColumnsToggleDropdown({ visibleCols, onToggle }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+  const shownCount = SAMPLE_TABLE_COLUMNS.filter(c => visibleCols[c.key] !== false).length;
+  return /*#__PURE__*/React.createElement("div", {
+    ref,
+    className: "relative inline-block text-left",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => setOpen(o => !o),
+    className: "flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium",
+    style: { border: `1px solid ${C.border}`, background: C.card, color: C.ink }
+  }, /*#__PURE__*/React.createElement(Icon, { name: "table", size: 14 }), `Columns (${shownCount}/${SAMPLE_TABLE_COLUMNS.length})`, /*#__PURE__*/React.createElement(Icon, { name: "chevronDown", size: 12, color: C.muted })),
+  open && /*#__PURE__*/React.createElement("div", {
+    className: "absolute right-0 top-full mt-1 w-64 rounded-lg shadow-lg py-1.5 col-toggle-menu",
+    style: { background: "#fff", border: `1px solid ${C.border}`, zIndex: 30 }
+  },
+  /*#__PURE__*/React.createElement("div", {
+    className: "px-3 py-1 text-[10px] font-semibold uppercase tracking-wide",
+    style: { color: C.muted }
+  }, "Show / hide columns"),
+  SAMPLE_TABLE_COLUMNS.map(c => /*#__PURE__*/React.createElement("label", {
+    key: c.key,
+    className: `col-toggle-row${c.locked ? " locked" : ""}`,
+    style: { color: C.ink }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: visibleCols[c.key] !== false,
+    disabled: !!c.locked,
+    onChange: () => onToggle(c.key)
+  }), c.label, c.locked && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px]",
+    style: { color: C.muted, marginLeft: "auto" }
+  }, "locked"))))
+  );
+}
+
+// ---- Floating Scroll to Top / Scroll to Bottom buttons for the Sample
+// Registration table. ----
+function ScrollNavButtons({ onTop, onBottom }) {
+  return /*#__PURE__*/React.createElement("div", { className: "scroll-nav-fab no-print" },
+    /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      title: "Scroll to top",
+      onClick: onTop,
+      style: { background: C.card, border: `1px solid ${C.border}`, color: C.ink }
+    }, /*#__PURE__*/React.createElement("span", { style: { display: "inline-flex", transform: "rotate(180deg)" } }, /*#__PURE__*/React.createElement(Icon, { name: "chevronDown", size: 16, color: C.ink }))),
+    /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      title: "Scroll to bottom",
+      onClick: onBottom,
+      style: { background: C.teal, border: `1px solid ${C.teal}`, color: "#fff" }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "chevronDown", size: 16, color: "#fff" }))
+  );
+}
+
 // ---- main tab: list + registration + detail ----
 function SamplesTab({
   samples,
@@ -1739,6 +1850,28 @@ function SamplesTab({
   // the default so sample IDs are visible on landing without any clicks —
   // see README "Flat Data Table" note.
   const [viewMode, setViewMode] = React.useState("flat");
+  // Column show/hide (Sample Registration table) — persisted in localStorage
+  // so a user's preferred column set survives a reload.
+  const [visibleCols, setVisibleCols] = React.useState(() => loadSampleColumnPrefs());
+  function toggleColumn(key) {
+    setVisibleCols(prev => {
+      const col = SAMPLE_TABLE_COLUMNS.find(c => c.key === key);
+      if (col?.locked) return prev; // Tracking No. / Actions can't be hidden
+      const next = { ...prev, [key]: prev[key] === false ? true : false };
+      saveSampleColumnPrefs(next);
+      return next;
+    });
+  }
+  const activeColumns = SAMPLE_TABLE_COLUMNS.filter(c => visibleCols[c.key] !== false);
+  // Scroll-to-top / Scroll-to-bottom for the Sample Registration table.
+  const sampleListTopRef = React.useRef(null);
+  const sampleListBottomRef = React.useRef(null);
+  function scrollSampleListToTop() {
+    sampleListTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function scrollSampleListToBottom() {
+    sampleListBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }
   // Real-time Registration Sync — ids of samples created in the last few
   // seconds get a highlight + "New" chip so a just-registered/imported
   // sample is unmistakable even in a long list (it also floats to the top
@@ -2016,6 +2149,71 @@ function SamplesTab({
     const overdue = isSampleOverdue(s);
     const rowRef = s.referenceId ? findReferenceById(references, s.referenceId) : null;
     const latLong = s.latitude || s.longitude ? `${s.latitude || "—"} / ${s.longitude || "—"}` : "—";
+    const registrationDate = s.createdAt ? new Date(s.createdAt).toLocaleDateString() : "—";
+    const cellByKey = {
+      sampleCode: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 font-medium whitespace-nowrap",
+        style: { color: C.ink, paddingLeft: indented ? 24 : undefined }
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "inline-flex items-center gap-1.5"
+      }, s.sampleCode, isNew && /*#__PURE__*/React.createElement("span", {
+        className: "inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide",
+        style: { background: C.teal, color: "#fff" }
+      }, "New"))),
+      refNo: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, rowRef?.refNo || "—"),
+      trackingNo: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, rowRef?.trackingNo || "—"),
+      clientContact: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.ink }
+      }, rowRef?.contactPerson || "—"),
+      customerName: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.ink }
+      }, s.clientName),
+      site: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.siteLocation),
+      district: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.district || "—"),
+      upazila: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.upazila || "—"),
+      ward: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.union || "—"),
+      sampleType: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.sampleType || "—"),
+      latLong: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, latLong),
+      waterPointType: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.waterPointType || "—"),
+      priority: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5"
+      }, /*#__PURE__*/React.createElement(PriorityBadge, { priority: s.priority })),
+      registrationDate: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, registrationDate),
+      status: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5"
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "flex items-center gap-1 flex-wrap"
+      }, /*#__PURE__*/React.createElement(SampleStatusBadge, { status: s.status }), overdue && /*#__PURE__*/React.createElement("span", {
+        className: "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
+        style: { background: C.warnBg, color: C.warn }
+      }, /*#__PURE__*/React.createElement(Icon, { name: "warning", size: 9 }), "Overdue"))),
+      assignedTo: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.assignedTo || "—"),
+      actions: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 text-right"
+      }, renderRowActions(s))
+    };
     return /*#__PURE__*/React.createElement("tr", {
       key: s.id,
       id: `sample-row-${s.id}`,
@@ -2026,108 +2224,13 @@ function SamplesTab({
         transition: "background-color 1.5s ease"
       },
       onClick: () => setOpenId(s.id)
-    }, /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 font-medium whitespace-nowrap",
-      style: {
-        color: C.ink,
-        paddingLeft: indented ? 24 : undefined
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "inline-flex items-center gap-1.5"
-    }, s.sampleCode, isNew && /*#__PURE__*/React.createElement("span", {
-      className: "inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide",
-      style: {
-        background: C.teal,
-        color: "#fff"
-      }
-    }, "New"))), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, rowRef?.refNo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, rowRef?.trackingNo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.ink
-      }
-    }, rowRef?.contactPerson || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.ink
-      }
-    }, s.clientName), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.siteLocation), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.district || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.upazila || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.union || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.sampleType || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, latLong), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.waterPointType || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5"
-    }, /*#__PURE__*/React.createElement(PriorityBadge, {
-      priority: s.priority
-    })), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center gap-1 flex-wrap"
-    }, /*#__PURE__*/React.createElement(SampleStatusBadge, {
-      status: s.status
-    }), overdue && /*#__PURE__*/React.createElement("span", {
-      className: "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold",
-      style: {
-        background: C.warnBg,
-        color: C.warn
-      }
-    }, /*#__PURE__*/React.createElement(Icon, {
-      name: "warning",
-      size: 9
-    }), "Overdue"))), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 whitespace-nowrap",
-      style: {
-        color: C.muted
-      }
-    }, s.assignedTo || "—"), /*#__PURE__*/React.createElement("td", {
-      className: "px-2 py-1.5 text-right"
-    }, renderRowActions(s)));
+    }, activeColumns.map(c => /*#__PURE__*/React.cloneElement(cellByKey[c.key], { key: c.key })));
   }
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 mb-4 flex-wrap"
   }, [{
     k: "samples",
-    label: "Samples Registration",
+    label: "Sample Registration",
     icon: "beaker"
   }, {
     k: "subBatches",
@@ -2269,7 +2372,11 @@ function SamplesTab({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: v.icon,
     size: 13
-  }), v.label)))), /*#__PURE__*/React.createElement("div", {
+  }), v.label))), /*#__PURE__*/React.createElement(ColumnsToggleDropdown, {
+    visibleCols,
+    onToggle: toggleColumn
+  })), /*#__PURE__*/React.createElement("div", {
+    ref: sampleListTopRef,
     className: "rounded-lg overflow-hidden",
     style: {
       border: `1px solid ${C.border}`
@@ -2283,13 +2390,13 @@ function SamplesTab({
     style: {
       background: C.bg
     }
-  }, ["Sample Code", "Ref / Memo No.", "Tracking No.", "Client", "Customer Name", "Site", "District", "City Corp./Pourosova/Upazilla", "Ward/Union", "Sample Type", "Latitude/Longitude", "Type of Water Point", "Priority", "Status", "Assigned To", ""].map(h => /*#__PURE__*/React.createElement("th", {
-    key: h,
+  }, activeColumns.map(c => /*#__PURE__*/React.createElement("th", {
+    key: c.key,
     className: "text-left px-2 py-1.5 text-[11px] font-semibold whitespace-nowrap",
     style: {
       color: C.muted
     }
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, viewMode === "flat" ? filtered.map(s => renderSampleRow(s, false)) : listItems.map(item => {
+  }, c.key === "actions" ? "" : c.label)))), /*#__PURE__*/React.createElement("tbody", null, viewMode === "flat" ? filtered.map(s => renderSampleRow(s, false)) : listItems.map(item => {
     if (item.type === "single") return renderSampleRow(item.sample, false);
     const isOpen = expandedBatches.has(item.referenceId);
     return /*#__PURE__*/React.createElement(React.Fragment, {
@@ -2302,7 +2409,7 @@ function SamplesTab({
       },
       onClick: () => toggleBatchExpand(item.referenceId)
     }, /*#__PURE__*/React.createElement("td", {
-      colSpan: 16,
+      colSpan: activeColumns.length,
       className: "px-3 py-2"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-2 flex-wrap"
@@ -2336,7 +2443,7 @@ function SamplesTab({
       members: item.members
     })))), isOpen && item.members.map(s => renderSampleRow(s, true)));
   }), (viewMode === "flat" ? !filtered.length : !listItems.length) && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 16,
+    colSpan: activeColumns.length,
     className: "px-3 py-2"
   }, /*#__PURE__*/React.createElement(EmptyState, {
     icon: "clipboard",
@@ -2349,7 +2456,10 @@ function SamplesTab({
       name: "plus",
       size: 13
     }), "Register Sample(s)") : undefined
-  })))))))), sampleSubTab === "subBatches" && /*#__PURE__*/React.createElement(SubBatchBuilder, {
+  }))))))), /*#__PURE__*/React.createElement("div", { ref: sampleListBottomRef }), /*#__PURE__*/React.createElement(ScrollNavButtons, {
+    onTop: scrollSampleListToTop,
+    onBottom: scrollSampleListToBottom
+  })), sampleSubTab === "subBatches" && /*#__PURE__*/React.createElement(SubBatchBuilder, {
     samples: samples,
     setSamples: setSamples,
     testTypes: testTypes,

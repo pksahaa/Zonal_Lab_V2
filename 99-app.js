@@ -463,7 +463,7 @@ function LabApp({
     icon: "home"
   }, {
     k: "samples",
-    label: "Samples",
+    label: t("samples"),
     icon: "clipboard"
   }, {
     k: "inventory",
