@@ -160,7 +160,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Within Reference Limit (Diluted)",
       flag: REMARK_FLAGS.NORMAL,
-      displayValue: null, // within limit — the value already reads fine in the Result column
+      displayValue: refLimitMax !== null ? `max: ${fmtNum(refLimitMax)}` : null,
       ruleId: "diluted_within_reference"
     };
   }
@@ -221,10 +221,19 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       ruleId: "below_reference"
     };
   }
+  // Nothing was crossed — still show whichever configured range the value
+  // actually landed inside (Reference Limit preferred, falling back to
+  // Detection range), so "Normal" results carry the same limit context as
+  // every other outcome instead of going blank.
+  const withinRangeLimit = refLimitMin !== null || refLimitMax !== null
+    ? `range: ${refLimitMin !== null ? fmtNum(refLimitMin) : "—"}–${refLimitMax !== null ? fmtNum(refLimitMax) : "—"}`
+    : minDetection !== null || maxDetection !== null
+      ? `range: ${minDetection !== null ? fmtNum(minDetection) : "—"}–${maxDetection !== null ? fmtNum(maxDetection) : "—"}`
+      : null;
   return {
     remark: "Within Acceptable Range",
     flag: REMARK_FLAGS.NORMAL,
-    displayValue: null, // within limit — the value already reads fine in the Result column
+    displayValue: withinRangeLimit,
     ruleId: "within_range"
   };
 }

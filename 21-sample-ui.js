@@ -1292,7 +1292,7 @@ function ClientPartSummaryBar({ clientPart, selectedTests, onEdit }) {
 }
 
 // ---- One clean card per sample (replaces the cramped 4-line flex rows) ----
-function SampleEntryCard({ index, row, updateRow, onDuplicate, onRemove, canRemove }) {
+function SampleEntryCard({ index, row, updateRow, onDuplicate, onRemove, canRemove, collectionDateFrom, collectionDateTo }) {
   const gridCls = "grid gap-3";
   const gridStyle = { gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" };
   const waterPointOptions = [{ value: "", label: "— Type of Water Point —" }].concat(WATER_POINT_TYPES.map(wt => ({ value: wt, label: wt })));
@@ -1339,6 +1339,14 @@ function SampleEntryCard({ index, row, updateRow, onDuplicate, onRemove, canRemo
     label: "Site Name/Village",
     value: row.village,
     onChange: v => updateRow("village", v)
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: `Collection Date (this water point)${collectionDateFrom ? ` — leave blank for ${collectionDateFrom}` : ""}`,
+    type: "date",
+    value: row.collectionDate,
+    min: collectionDateFrom || undefined,
+    max: collectionDateTo || undefined,
+    onChange: v => updateRow("collectionDate", v)
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "District",
@@ -1390,7 +1398,8 @@ function emptySampleRow() {
     latitude: "",
     longitude: "",
     waterPointType: "",
-    waterPointTypeOther: ""
+    waterPointTypeOther: "",
+    collectionDate: ""
   };
 }
 
@@ -1410,7 +1419,8 @@ function BatchRegistrationForm({
   const [step1Confirmed, setStep1Confirmed] = React.useState(false);
   const [shared, setShared] = React.useState({
     sampleType: "Drinking Water",
-    collectionDate: todayStr(),
+    collectionDateFrom: todayStr(),
+    collectionDateTo: todayStr(),
     collectedBy: "",
     receivedDate: todayStr(),
     priority: "Routine"
@@ -1452,6 +1462,9 @@ function BatchRegistrationForm({
     if (clientPart.sourceType === "others" && !(clientPart.sourceTypeOther || "").trim()) return "Please specify the Client Source.";
     if (clientPart.clientType === "Others (Pls Specify)" && !(clientPart.clientTypeOther || "").trim()) return "Please specify the Client Type.";
     if (selectedTests.length === 0) return "Select at least one requested test.";
+    if (shared.collectionDateFrom && shared.collectionDateTo && shared.collectionDateTo < shared.collectionDateFrom) {
+      return "Collection Date \u2014 To can't be before Collection Date \u2014 From.";
+    }
     return "";
   }
   function goToStep2() {
@@ -1558,10 +1571,17 @@ function BatchRegistrationForm({
     options: ["Routine", "Urgent"].map(m => ({ value: m, label: m }))
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
-    label: "Collection Date",
+    label: "Collection Date — From",
     type: "date",
-    value: shared.collectionDate,
-    onChange: v => setShared({ ...shared, collectionDate: v })
+    value: shared.collectionDateFrom,
+    onChange: v => setShared({ ...shared, collectionDateFrom: v, collectionDateTo: shared.collectionDateTo < v ? v : shared.collectionDateTo })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Collection Date — To",
+    type: "date",
+    value: shared.collectionDateTo,
+    min: shared.collectionDateFrom || undefined,
+    onChange: v => setShared({ ...shared, collectionDateTo: v })
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Received Date",
@@ -1573,7 +1593,10 @@ function BatchRegistrationForm({
     label: "Collected By",
     value: shared.collectedBy,
     onChange: v => setShared({ ...shared, collectedBy: v })
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("p", {
+    className: "text-xs mt-2",
+    style: { color: C.muted }
+  }, "Each water point in Step 2 can be given its own single Collection Date if it differs from the rest — leave it blank there to default to ", shared.collectionDateFrom || "the From date", "."), /*#__PURE__*/React.createElement("div", {
     className: "h-px",
     style: { background: C.border }
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -1626,7 +1649,9 @@ function BatchRegistrationForm({
     updateRow: (field, v) => updateRow(i, field, v),
     onDuplicate: () => duplicateRow(i),
     onRemove: () => removeRow(i),
-    canRemove: rows.length > 1
+    canRemove: rows.length > 1,
+    collectionDateFrom: shared.collectionDateFrom,
+    collectionDateTo: shared.collectionDateTo
   }))), rows.length >= MAX_BATCH_ROWS && /*#__PURE__*/React.createElement("p", {
     className: "text-xs",
     style: { color: C.muted }
@@ -1672,6 +1697,8 @@ function ImportTestPickerModal({
 }) {
   const [selectedTests, setSelectedTests] = React.useState([]);
   const [clientPart, setClientPart] = React.useState({ ...CLIENT_PART_EMPTY });
+  const [collectionDateFrom, setCollectionDateFrom] = React.useState(todayStr());
+  const [collectionDateTo, setCollectionDateTo] = React.useState(todayStr());
   const [err, setErr] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   function toggleTest(t) {
@@ -1686,6 +1713,10 @@ function ImportTestPickerModal({
       setErr("Select at least one requested test.");
       return;
     }
+    if (collectionDateTo < collectionDateFrom) {
+      setErr("Collection Date \u2014 To can't be before Collection Date \u2014 From.");
+      return;
+    }
     const result = submitClientPart(clientPart, references, session);
     if (result.error) {
       setErr(result.error);
@@ -1693,7 +1724,7 @@ function ImportTestPickerModal({
     }
     setReferences(prev => [...prev, result.reference], result.reference);
     setSaving(true);
-    await onConfirm(selectedTests, result.reference);
+    await onConfirm(selectedTests, result.reference, { collectionDateFrom, collectionDateTo });
     setSaving(false);
   }
   return /*#__PURE__*/React.createElement(Modal, {
@@ -1714,6 +1745,31 @@ function ImportTestPickerModal({
     setForm: setClientPart,
     references: references
   })), /*#__PURE__*/React.createElement("div", {
+    className: "mb-4 p-3 rounded",
+    style: { background: C.bg, border: `1px solid ${C.border}` }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold mb-2",
+    style: { color: C.ink }
+  }, "Collection Date Range"), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs mb-3",
+    style: { color: C.muted }
+  }, "Applied to any row in the manifest that doesn't already have its own \"Collection Date\" column value. Rows with a Collection Date in the upload keep that date."), /*#__PURE__*/React.createElement("div", {
+    className: "grid gap-3",
+    style: { gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }
+  }, /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Collection Date — From",
+    type: "date",
+    value: collectionDateFrom,
+    onChange: v => { setCollectionDateFrom(v); if (collectionDateTo < v) setCollectionDateTo(v); }
+  }), /*#__PURE__*/React.createElement(TextField, {
+    simple: true,
+    label: "Collection Date — To",
+    type: "date",
+    value: collectionDateTo,
+    min: collectionDateFrom || undefined,
+    onChange: v => setCollectionDateTo(v)
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-2",
     style: {
       color: C.muted
@@ -2084,11 +2140,12 @@ function SamplesTab({
   // the same requestedTests AND the same Reference (one manifest sheet =
   // one source), instead of each row auto-creating its own Reference from
   // a BatchRef column.
-  async function confirmImportSamples(requestedTests, ref) {
+  async function confirmImportSamples(requestedTests, ref, dateRange) {
     let runningSamples = [...samples];
     let count = 0;
     const newIds = [];
     for (const row of pendingImportRows) {
+      const rowCollectionDate = String(readSampleImportField(row, "collectionDate") || "").trim();
       const sample = createSample({
         clientName: String(readSampleImportField(row, "customerName")).trim(),
         siteLocation: String(readSampleImportField(row, "siteName")).trim(),
@@ -2104,7 +2161,11 @@ function SamplesTab({
         referenceId: ref ? ref.id : "",
         batchRef: ref ? ref.refNo : "",
         sampleType: String(readSampleImportField(row, "sampleType") || "Drinking Water").trim(),
-        collectionDate: String(readSampleImportField(row, "collectionDate") || todayStr()),
+        // Per-row Collection Date from the manifest wins; otherwise fall back
+        // to the start of the batch's Collection Date range picked in this
+        // dialog (not always "today" — the whole point of the range is to
+        // cover manifests collected over several days).
+        collectionDate: rowCollectionDate || dateRange?.collectionDateFrom || todayStr(),
         collectedBy: String(readSampleImportField(row, "collectedBy")).trim(),
         receivedDate: String(readSampleImportField(row, "receivedDate") || todayStr()),
         priority: String(readSampleImportField(row, "priority") || "Routine").trim(),
@@ -2133,9 +2194,13 @@ function SamplesTab({
     let runningSamples = [...samples];
     let count = 0;
     const newIds = [];
+    const { collectionDateFrom, collectionDateTo, ...sharedRest } = shared;
     for (const row of rows) {
       const sample = createSample({
-        ...shared,
+        ...sharedRest,
+        // Each water point can carry its own single collection date; if left
+        // blank it defaults to the start of the batch's collection range.
+        collectionDate: row.collectionDate || collectionDateFrom,
         clientName: row.customerName,
         siteLocation: row.village,
         referenceId: ref.id,

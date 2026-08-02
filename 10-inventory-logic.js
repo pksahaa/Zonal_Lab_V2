@@ -342,8 +342,11 @@ function downloadTemplate(kind) {
     // Note: Requested Tests, Client Type/Source, and Tracking No./Reference are
     // no longer per-row columns — after uploading this file you'll pick the
     // tests and enter the Client/Reference details once, in-app.
+    // Note: CollectionDate can be left blank per row — any row without one
+    // gets the start date of the Collection Date Range entered on the same
+    // "a few more details" screen used to pick tests/Client after upload.
     headers = SAMPLE_IMPORT_COLUMNS.map(c => c.header);
-    rows = [["Md. Musha Mia", "Md. Abdul Karim", "Rangpur", "Sadar", "Chandanpat", "Sreerampur", "25.7439", "89.2752", "Shallow TW (STW)", "", "Drinking Water", "2026-01-10", "Field Team A", "2026-01-12", "Routine", ""], ["Md. Moynul Hossain", "Md. Rafiqul Islam", "Rangpur", "Sadar", "City Corporation", "New Jummapara", "25.7501", "89.2612", "Deep TW (DTW)", "", "Drinking Water", "2026-01-10", "Field Team A", "2026-01-12", "Routine", ""]];
+    rows = [["Md. Musha Mia", "Md. Abdul Karim", "Rangpur", "Sadar", "Chandanpat", "Sreerampur", "25.7439", "89.2752", "Shallow TW (STW)", "", "Drinking Water", "2026-01-10", "Field Team A", "2026-01-12", "Routine"], ["Md. Moynul Hossain", "Md. Rafiqul Islam", "Rangpur", "Sadar", "City Corporation", "New Jummapara", "25.7501", "89.2612", "Deep TW (DTW)", "", "Drinking Water", "", "Field Team A", "2026-01-12", "Routine"]];
   } else if (kind === "chemicals") {
     headers = ["ChemicalName", "Unit", "DateReceived", "ExpiryDate", "Amount", "Origin", "ReceivedFrom"];
     rows = [["Fe Standard", "ml", "2026-01-10", "2026-07-10", 500, "Central Reagent Store", "DPHE Water Safety Project"], ["HCl", "ml", "2026-01-10", "2026-12-31", 1000, "Local Chemical Supplier", "Zonal Office Procurement"]];
