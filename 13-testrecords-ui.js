@@ -2007,6 +2007,7 @@ function TestRecordsTab({
   setSubBatches,
   references,
   testTypes,
+  parameters,
   session,
   goToSample,
   goToResultsWorkflow,
@@ -2121,6 +2122,17 @@ function TestRecordsTab({
   }), pageRows.map((r, rowIdx) => {
     const isOpen = !!expanded[r.id];
     const chemPairs = Object.entries(r.consumption);
+    const rowRef = referenceForRecord(r);
+    // Cost of Test shown here always mirrors the linked parameter's current
+    // Standard Fee (same live lookup as Test Types and Add Test Record) —
+    // previously this row had no direct "Cost of Test" figure at all, only
+    // a total Revenue badge, which is why it looked disconnected from
+    // whatever the Parameter said the fee should be.
+    const recordTestType = (testTypes || []).find(t => t.id === r.testTypeId);
+    const linkedFeeParam = recordTestType && (recordTestType.linkedParameterIds || []).length > 0
+      ? (parameters || []).find(p => p.id === recordTestType.linkedParameterIds[0])
+      : null;
+    const liveUnitCost = linkedFeeParam ? Number(linkedFeeParam.standardFee) || 0 : Number(recordTestType?.costPerTest) || 0;
     return /*#__PURE__*/React.createElement("div", {
       key: r.id,
       className: "rounded",
@@ -2129,32 +2141,37 @@ function TestRecordsTab({
       }
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => toggleExpand(r.id),
-      className: "w-full flex items-center gap-3 px-3 py-2 text-left flex-wrap",
+      className: "w-full flex items-center justify-between gap-3 px-3 py-2 text-left overflow-x-auto",
       style: {
         background: isOpen ? `${C.teal}14` : rowIdx % 2 === 1 ? C.bg : C.card
       }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-3 shrink-0"
     }, /*#__PURE__*/React.createElement(Icon, {
       name: isOpen ? "chevronDown" : "chevronRight",
       size: 14,
       color: C.muted
     }), /*#__PURE__*/React.createElement("span", {
-      className: "text-xs w-24 shrink-0",
+      className: "text-xs shrink-0",
       style: {
         color: C.muted
       }
     }, r.date), /*#__PURE__*/React.createElement("span", {
-      className: "text-sm font-semibold flex-1 min-w-[140px]",
+      className: "text-xs font-semibold shrink-0",
       style: {
         color: C.ink
       }
     }, r.testTypeName), /*#__PURE__*/React.createElement("span", {
-      className: "text-[11px] px-1.5 py-0.5 rounded font-mono",
+      className: "text-xs shrink-0",
       style: {
-        background: C.bg,
         color: C.muted
-      },
-      title: "Date | Test Name | Ref / Memo No. | Tracking No."
-    }, formatBatchIdentifier(r.date, r.testTypeName, referenceForRecord(r)?.refNo, referenceForRecord(r)?.trackingNo)), (() => {
+      }
+    }, "Ref: ", /*#__PURE__*/React.createElement("span", { style: { color: C.ink } }, rowRef?.refNo || "—")), /*#__PURE__*/React.createElement("span", {
+      className: "text-xs shrink-0",
+      style: {
+        color: C.muted
+      }
+    }, "Tracking: ", /*#__PURE__*/React.createElement("span", { style: { color: C.ink } }, rowRef?.trackingNo || "—")), (() => {
       // Which unit does this record actually cover — a Sub-Batch (many
       // samples, one parameter) or one Individual Sample? Previously the
       // row only showed the test name + date, with no way to tell.
@@ -2174,8 +2191,11 @@ function TestRecordsTab({
         name: "flask",
         size: 11
       }), " Individual: ", sample ? sample.sampleCode : r.sampleCode || "(sample removed)");
-    })(), /*#__PURE__*/React.createElement("span", {
-      className: "text-xs",
+    })()), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-3 shrink-0 ml-auto",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-xs shrink-0",
       style: {
         color: C.muted
       }
@@ -2191,13 +2211,17 @@ function TestRecordsTab({
       tone: "warn"
     }, r.numberOfDilutedSamples || 0, " diluted"), r.qcCheck && /*#__PURE__*/React.createElement(Badge, {
       tone: r.qcCheck.pass ? "ok" : "warn"
-    }, "QC ", r.qcCheck.pass ? "Pass" : "Fail"), r.feeApplicable === false ? /*#__PURE__*/React.createElement(Badge, {
+    }, "QC ", r.qcCheck.pass ? "Pass" : "Fail"), /*#__PURE__*/React.createElement("span", {
+      className: "text-xs shrink-0",
+      style: {
+        color: C.muted
+      }
+    }, "Cost of Test: ", /*#__PURE__*/React.createElement("span", { style: { color: C.ink } }, "৳", fmtNum(liveUnitCost))), r.feeApplicable === false ? /*#__PURE__*/React.createElement(Badge, {
       tone: "muted"
     }, "Free") : /*#__PURE__*/React.createElement(Badge, {
       tone: "ok"
     }, "৳", fmtNum(r.revenue || 0)), /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center gap-1 ml-auto",
-      onClick: e => e.stopPropagation()
+      className: "flex items-center gap-1"
     }, /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
       color: C.teal,
@@ -2208,7 +2232,7 @@ function TestRecordsTab({
       color: C.warn,
       title: "Delete record",
       onClick: () => setDeleteRecord(r)
-    }))), isOpen && /*#__PURE__*/React.createElement("div", {
+    })))), isOpen && /*#__PURE__*/React.createElement("div", {
       className: "px-4 py-3 text-xs grid grid-cols-2 md:grid-cols-3 gap-3",
       style: {
         borderTop: `1px solid ${C.border}`

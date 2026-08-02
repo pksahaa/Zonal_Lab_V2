@@ -616,6 +616,7 @@ function LabApp({
     setSubBatches: setSubBatches,
     references: references,
     testTypes: testTypes,
+    parameters: parameters,
     session: session,
     goToSample: goToSample,
     goToResultsWorkflow: goToResultsWorkflow,

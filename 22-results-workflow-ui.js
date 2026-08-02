@@ -71,7 +71,7 @@ function bulkMarkReviewed(sampleList, testTypeId, testTypeName, session, setSamp
     const rt = (sample.requestedTests || []).find(r => r.testTypeId === testTypeId);
     if (!rt || rt.status !== "results_entered") return;
     const updated = setRequestedTestStatus(sample, testTypeId, "under_review", session);
-    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     count++;
   });
   notify?.(`${count} sample(s) marked reviewed for ${testTypeName} — ready for final approval.`, "ok");
@@ -149,17 +149,17 @@ function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notif
     const nextRecords = voidSampleResultForTest(testRecords, sample, testTypeId);
     if (nextRecords !== testRecords) setTestRecords?.(nextRecords);
     const updated = returnRequestedTestToAnalyst(sample, testTypeId, testTypeName, session);
-    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} returned to analyst for ${testTypeName} — back in the pending-testing queue, same as a freshly registered sample.`, "warn");
   }
   function doHold() {
     const updated = holdRequestedTestForSample(sample, testTypeId, testTypeName, session);
-    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} put on hold for ${testTypeName} — parked in Awaiting Review, other samples in this batch are unaffected.`, "warn");
   }
   function doResume() {
     const updated = resumeRequestedTestForSample(sample, testTypeId, testTypeName, session);
-    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s));
+    setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} resumed for ${testTypeName} — back in the normal queue.`, "ok");
   }
   return E("div", { className: "flex flex-wrap items-center gap-1.5" },
@@ -196,7 +196,7 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
   }
   function doRelease() {
     const result = bulkReleaseParameter([sample], testTypeId, testTypeName, session);
-    result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+    result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
     if (result.updated.length) notify?.(`${sample.sampleCode} released for ${testTypeName}.`, "ok");
   }
   const cells = [
@@ -233,7 +233,7 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
         onConfirm: payload => {
           try {
             const result = bulkDecideParameter([sample], testTypeId, testTypeName, payload, session);
-            result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+            result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
             if (result.updated.length) {
               notify?.(
                 payload.decision === "approved" ? `${sample.sampleCode} approved for ${testTypeName}.` : `${sample.sampleCode} sent back to analyst for ${testTypeName}.`,
@@ -286,7 +286,7 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
       }
       function doBulkRelease() {
         const result = bulkReleaseParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, session);
-        result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+        result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
         notify?.(`${result.updated.length} sample(s) released for ${bucket.testTypeName}.`, "ok");
       }
       const bucketSigningKey = `bucket__${bucket.key}`;
@@ -319,7 +319,7 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
           onConfirm: payload => {
             try {
               const result = bulkDecideParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, payload, session);
-              result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s)));
+              result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
               notify?.(
                 payload.decision === "approved" ? `${result.updated.length} sample(s) approved for ${bucket.testTypeName}.` : `${result.updated.length} sample(s) sent back to analyst for ${bucket.testTypeName}.`,
                 payload.decision === "approved" ? "ok" : "warn"
