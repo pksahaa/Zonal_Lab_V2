@@ -1341,7 +1341,7 @@ function SampleEntryCard({ index, row, updateRow, onDuplicate, onRemove, canRemo
     onChange: v => updateRow("village", v)
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
-    label: `Collection Date (this water point)${collectionDateFrom ? ` — leave blank for ${collectionDateFrom}` : ""}`,
+    label: "Collection Date",
     type: "date",
     value: row.collectionDate,
     min: collectionDateFrom || undefined,
@@ -1699,6 +1699,7 @@ function ImportTestPickerModal({
   const [clientPart, setClientPart] = React.useState({ ...CLIENT_PART_EMPTY });
   const [collectionDateFrom, setCollectionDateFrom] = React.useState(todayStr());
   const [collectionDateTo, setCollectionDateTo] = React.useState(todayStr());
+  const [priority, setPriority] = React.useState("Routine");
   const [err, setErr] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   function toggleTest(t) {
@@ -1724,7 +1725,7 @@ function ImportTestPickerModal({
     }
     setReferences(prev => [...prev, result.reference], result.reference);
     setSaving(true);
-    await onConfirm(selectedTests, result.reference, { collectionDateFrom, collectionDateTo });
+    await onConfirm(selectedTests, result.reference, { collectionDateFrom, collectionDateTo, priority });
     setSaving(false);
   }
   return /*#__PURE__*/React.createElement(Modal, {
@@ -1750,10 +1751,10 @@ function ImportTestPickerModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-semibold mb-2",
     style: { color: C.ink }
-  }, "Collection Date Range"), /*#__PURE__*/React.createElement("div", {
+  }, "Batch Defaults"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-3",
     style: { color: C.muted }
-  }, "Applied to any row in the manifest that doesn't already have its own \"Collection Date\" column value. Rows with a Collection Date in the upload keep that date."), /*#__PURE__*/React.createElement("div", {
+  }, "Collection Date is applied to any row in the manifest that doesn't already have its own \"Collection Date\" column value — rows with one keep that date. Priority applies to every sample in this upload."), /*#__PURE__*/React.createElement("div", {
     className: "grid gap-3",
     style: { gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }
   }, /*#__PURE__*/React.createElement(TextField, {
@@ -1769,6 +1770,12 @@ function ImportTestPickerModal({
     value: collectionDateTo,
     min: collectionDateFrom || undefined,
     onChange: v => setCollectionDateTo(v)
+  }), /*#__PURE__*/React.createElement(SelectField, {
+    simple: true,
+    label: "Priority",
+    value: priority,
+    onChange: setPriority,
+    options: ["Routine", "Urgent"].map(m => ({ value: m, label: m }))
   }))), /*#__PURE__*/React.createElement("div", {
     className: "text-xs mb-2",
     style: {
@@ -1817,6 +1824,7 @@ const SAMPLE_TABLE_COLUMNS = [
   { key: "upazila", label: "Upazilla" },
   { key: "ward", label: "Ward/Union" },
   { key: "sampleType", label: "Sample Type" },
+  { key: "collectionDate", label: "Collection Date" },
   { key: "collectedBy", label: "Collected By" },
   { key: "latLong", label: "Lat/Long" },
   { key: "waterPointType", label: "Type of Water Point" },
@@ -2140,7 +2148,7 @@ function SamplesTab({
   // the same requestedTests AND the same Reference (one manifest sheet =
   // one source), instead of each row auto-creating its own Reference from
   // a BatchRef column.
-  async function confirmImportSamples(requestedTests, ref, dateRange) {
+  async function confirmImportSamples(requestedTests, ref, batchDefaults) {
     let runningSamples = [...samples];
     let count = 0;
     const newIds = [];
@@ -2165,10 +2173,14 @@ function SamplesTab({
         // to the start of the batch's Collection Date range picked in this
         // dialog (not always "today" — the whole point of the range is to
         // cover manifests collected over several days).
-        collectionDate: rowCollectionDate || dateRange?.collectionDateFrom || todayStr(),
+        collectionDate: rowCollectionDate || batchDefaults?.collectionDateFrom || todayStr(),
         collectedBy: String(readSampleImportField(row, "collectedBy")).trim(),
         receivedDate: String(readSampleImportField(row, "receivedDate") || todayStr()),
-        priority: String(readSampleImportField(row, "priority") || "Routine").trim(),
+        // Priority is a Batch Default picked in the popup, not a manifest
+        // column — same field, same reasoning as Collection Date/Sample Type
+        // in the manual Register Sample flow, just entered once for the
+        // whole upload instead of per row.
+        priority: batchDefaults?.priority || "Routine",
         numberOfSamples: 1,
         requestedTests
       }, runningSamples, session);
@@ -2395,6 +2407,9 @@ function SamplesTab({
       sampleType: /*#__PURE__*/React.createElement("td", {
         className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
       }, s.sampleType || "—"),
+      collectionDate: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.collectionDate || "—"),
       collectedBy: /*#__PURE__*/React.createElement("td", {
         className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
       }, s.collectedBy || "—"),

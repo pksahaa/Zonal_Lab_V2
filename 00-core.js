@@ -527,10 +527,6 @@ const SAMPLE_IMPORT_COLUMNS = [{
   key: "receivedDate",
   header: "ReceivedDate",
   aliases: ["Received Date"]
-}, {
-  key: "priority",
-  header: "Priority",
-  aliases: []
 }];
 // Looks up a field's value from a parsed Excel row, trying the canonical header first,
 // then every accepted alias — so old manifests and the current template both work.
