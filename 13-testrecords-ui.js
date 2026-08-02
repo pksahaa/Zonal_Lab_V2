@@ -2133,6 +2133,7 @@ function TestRecordsTab({
       ? (parameters || []).find(p => p.id === recordTestType.linkedParameterIds[0])
       : null;
     const liveUnitCost = linkedFeeParam ? Number(linkedFeeParam.standardFee) || 0 : Number(recordTestType?.costPerTest) || 0;
+    const billedSamplesForRow = r.billedSamples ?? r.numberOfFieldSamples ?? r.numberOfSamples ?? 0;
     return /*#__PURE__*/React.createElement("div", {
       key: r.id,
       className: "rounded",
@@ -2211,16 +2212,11 @@ function TestRecordsTab({
       tone: "warn"
     }, r.numberOfDilutedSamples || 0, " diluted"), r.qcCheck && /*#__PURE__*/React.createElement(Badge, {
       tone: r.qcCheck.pass ? "ok" : "warn"
-    }, "QC ", r.qcCheck.pass ? "Pass" : "Fail"), /*#__PURE__*/React.createElement("span", {
-      className: "text-xs shrink-0",
-      style: {
-        color: C.muted
-      }
-    }, "Cost of Test: ", /*#__PURE__*/React.createElement("span", { style: { color: C.ink } }, "৳", fmtNum(liveUnitCost))), r.feeApplicable === false ? /*#__PURE__*/React.createElement(Badge, {
+    }, "QC ", r.qcCheck.pass ? "Pass" : "Fail"), r.feeApplicable === false ? /*#__PURE__*/React.createElement(Badge, {
       tone: "muted"
     }, "Free") : /*#__PURE__*/React.createElement(Badge, {
       tone: "ok"
-    }, "৳", fmtNum(r.revenue || 0)), /*#__PURE__*/React.createElement("div", {
+    }, "Total Cost: BDT ", fmtNum(liveUnitCost * billedSamplesForRow)), /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-1"
     }, /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
