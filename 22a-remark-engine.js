@@ -333,23 +333,14 @@ function SystemRemarkBadge({ flag, remark, ruleId }) {
 }
 
 // The "System Remark" table cell: one auto-generated badge per evaluated
-// parameter (a method can have more than one result/parameter), plus an
-// inline editable manual-override remark the reviewer/lab manager can add
-// alongside it.
-function SystemRemarkCell({ evaluated, manualRemark, onManualRemarkChange, editable }) {
-  const [draft, setDraft] = React.useState(manualRemark || "");
-  const [editing, setEditing] = React.useState(false);
-  React.useEffect(() => { setDraft(manualRemark || ""); }, [manualRemark]);
-
+// parameter (a method can have more than one result/parameter), plus a
+// read-only line for a manual reviewer remark if one has been added. The
+// remark editor itself lives in the Actions column (see RemarkEditRow in
+// 22-results-workflow-ui.js) so this cell never grows taller than its
+// badges just to make room for an edit control most rows won't use.
+function SystemRemarkCell({ evaluated, manualRemark }) {
   if (!evaluated.length) {
     return React.createElement("span", { className: "text-xs", style: { color: C.muted } }, "—");
-  }
-
-  function commit() {
-    setEditing(false);
-    if ((draft || "").trim() !== (manualRemark || "")) {
-      onManualRemarkChange?.((draft || "").trim());
-    }
   }
 
   return React.createElement("div", { className: "flex flex-col gap-1 min-w-0" },
@@ -361,30 +352,13 @@ function SystemRemarkCell({ evaluated, manualRemark, onManualRemarkChange, edita
       React.createElement(SystemRemarkBadge, { flag: ev.flag, remark: ev.remark, ruleId: ev.ruleId }),
       ev.displayValue && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `(${ev.displayValue}${ev.unit ? ` ${ev.unit}` : ""})`)
     )),
-    editable && (
-      editing
-        ? React.createElement("div", { className: "flex items-center gap-1 mt-0.5" },
-            React.createElement("input", {
-              autoFocus: true,
-              className: "border rounded px-1.5 py-0.5 text-[11px] flex-1",
-              style: { borderColor: C.border },
-              placeholder: "Add reviewer remark…",
-              value: draft,
-              onChange: e => setDraft(e.target.value),
-              onKeyDown: e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(manualRemark || ""); setEditing(false); } },
-              onBlur: commit
-            })
-          )
-        : React.createElement("button", {
-            type: "button",
-            className: "text-left text-[11px] flex items-center gap-1",
-            style: { color: manualRemark ? C.ink : C.muted },
-            title: "Edit reviewer remark",
-            onClick: () => setEditing(true)
-          },
-            React.createElement(Icon, { name: "edit", size: 11 }),
-            manualRemark || "Add remark…"
-          )
+    manualRemark && React.createElement("div", {
+      className: "text-[11px] flex items-center gap-1",
+      style: { color: C.ink },
+      title: "Reviewer remark"
+    },
+      React.createElement(Icon, { name: "edit", size: 11 }),
+      manualRemark
     )
   );
 }

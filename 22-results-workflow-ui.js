@@ -39,6 +39,51 @@
 
 const E = React.createElement;
 
+// ---- floating scroll-to-top / scroll-to-bottom buttons — the page itself
+// scrolls (LabApp's shell is min-h-screen, no inner overflow container), so
+// this just drives window.scrollTo. Only rendered once the page is tall
+// enough to actually need it, and hides itself again once nothing's above
+// or below the current position, so it never sits there uselessly. ----
+function ScrollTopBottomButtons() {
+  const [canUp, setCanUp] = React.useState(false);
+  const [canDown, setCanDown] = React.useState(false);
+  React.useEffect(() => {
+    function update() {
+      const scrollable = document.documentElement.scrollHeight > window.innerHeight + 80;
+      setCanUp(scrollable && window.scrollY > 200);
+      setCanDown(scrollable && window.scrollY + window.innerHeight < document.documentElement.scrollHeight - 200);
+    }
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const id = setInterval(update, 800); // table rows expand/collapse without a scroll event — catch those too
+    return () => { window.removeEventListener("scroll", update); window.removeEventListener("resize", update); clearInterval(id); };
+  }, []);
+  if (!canUp && !canDown) return null;
+  const btnStyle = {
+    width: 34, height: 34, borderRadius: "50%",
+    background: C.card, border: `1px solid ${C.border}`,
+    boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    color: C.teal
+  };
+  return E("div", {
+    className: "no-print",
+    style: { position: "fixed", right: 18, bottom: 18, zIndex: 40, display: "flex", flexDirection: "column", gap: 8 }
+  },
+    canUp && E("button", {
+      type: "button", title: "Scroll to top",
+      onClick: () => window.scrollTo({ top: 0, behavior: "smooth" }),
+      style: btnStyle
+    }, E("svg", { viewBox: "0 0 24 24", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, E("path", { d: "M18 15l-6-6-6 6" }))),
+    canDown && E("button", {
+      type: "button", title: "Scroll to bottom",
+      onClick: () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }),
+      style: btnStyle
+    }, E("svg", { viewBox: "0 0 24 24", width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, E("path", { d: "M6 9l6 6 6-6" })))
+  );
+}
+
 // ---- shared grouping: every (sample, requestedTest) pair currently at
 // `stage`, grouped by testTypeId. This is what makes the queues indifferent
 // to Sub-Batch vs. individual vs. Batch(Reference) origin. ----
@@ -170,6 +215,35 @@ function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notif
   );
 }
 
+// ---- expandable "reviewer remark" editor row, opened from the Actions
+// column's edit icon (see StageRow) instead of living inline inside the
+// System Remark cell — keeps every row a single line unless someone is
+// actually mid-edit. Mirrors the SignatureCapture expansion row already
+// used for Final Approve/Reject just below it. ----
+function RemarkEditRow({ manualRemark, onSave, onClose, colSpan }) {
+  const [draft, setDraft] = React.useState(manualRemark || "");
+  function commit() {
+    onSave((draft || "").trim());
+    onClose();
+  }
+  return E("tr", null, E("td", { colSpan, className: "px-3 pb-2 pt-1" },
+    E("div", { className: "flex items-center gap-1.5" },
+      E(Icon, { name: "edit", size: 12, color: C.muted }),
+      E("input", {
+        autoFocus: true,
+        className: "border rounded px-2 py-1 text-xs flex-1",
+        style: { borderColor: C.border },
+        placeholder: "Add reviewer remark…",
+        value: draft,
+        onChange: e => setDraft(e.target.value),
+        onKeyDown: e => { if (e.key === "Enter") commit(); if (e.key === "Escape") onClose(); }
+      }),
+      E(Button, { size: "sm", onClick: commit }, "Save"),
+      E("button", { type: "button", className: "text-xs px-2", style: { color: C.muted }, onClick: onClose }, "Cancel")
+    )
+  ));
+}
+
 // ---- one sample row, used by both Flat View (all rows in one table, with
 // a Test Type column since nothing else identifies which parameter a row is
 // for) and Analytical Batch View (rows nested under their originating
@@ -179,7 +253,7 @@ function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notif
 // bulkMarkReviewed / bulkDecideParameter / bulkReleaseParameter functions
 // bulk actions use, just called with a one-sample list, so per-row and
 // bulk/batch behavior can never drift apart. ----
-function StageRow({ row, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn, signingKey, setSigningKey }) {
+function StageRow({ row, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey }) {
   const { sample, testTypeId, testTypeName } = row;
   const held = isTestOnHold(sample, testTypeId);
   const resultInfo = getSampleResultForTest(sample, testTypeId, testRecords);
@@ -187,6 +261,9 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
   const evaluated = showSystemRemark ? evaluateSampleResultsForTest(sample, testTypeId, testTypes, parameters, testRecords) : [];
   const rowKey = `${sample.id}__${testTypeId}`;
   const isSigningThisRow = signingKey === rowKey;
+  const isEditingRemarkThisRow = remarkEditKey === rowKey;
+  const currentManualRemark = getManualRemark(sample, testTypeId);
+  const canEditRemark = showSystemRemark && !!setSamples;
   function handleManualRemarkChange(text) {
     const updated = setManualRemarkOnSample(sample, testTypeId, text);
     setSamples?.(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
@@ -220,18 +297,31 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
     : "—";
   cells.push(E("td", { key: "result", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.ink }, title: resultText }, resultText));
   if (showSystemRemark) cells.push(E("td", { key: "remark", className: "px-2 py-1.5" },
-    E(SystemRemarkCell, { evaluated, manualRemark: getManualRemark(sample, testTypeId), onManualRemarkChange: handleManualRemarkChange, editable: !!setSamples })
+    E(SystemRemarkCell, { evaluated, manualRemark: currentManualRemark })
   ));
   cells.push(E("td", { key: "actions", className: "px-2 py-1.5" },
     E("div", { className: "flex items-center gap-1 whitespace-nowrap" },
       !held && stage === "review" && E(IconButton, { name: "check", color: C.teal, title: "Mark Reviewed", onClick: doMarkReviewed }),
       !held && stage === "approve" && E(IconButton, { name: "check", color: C.teal, title: "Final Approve / Reject", onClick: () => setSigningKey(isSigningThisRow ? null : rowKey) }),
       !held && stage === "release" && E(IconButton, { name: "printer", color: C.teal, title: "Release", onClick: doRelease }),
+      canEditRemark && E(IconButton, {
+        name: "edit",
+        color: currentManualRemark ? C.teal : C.muted,
+        title: currentManualRemark ? "Edit reviewer remark" : "Add reviewer remark",
+        onClick: () => setRemarkEditKey(isEditingRemarkThisRow ? null : rowKey)
+      }),
       E(RowHoldReturnActions, { sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size: "sm" })
     )
   ));
   return E(React.Fragment, { key: rowKey },
     E("tr", { className: "border-t", style: { borderColor: C.border } }, cells),
+    isEditingRemarkThisRow && E(RemarkEditRow, {
+      key: `${rowKey}-remark`,
+      manualRemark: currentManualRemark,
+      colSpan: cells.length,
+      onSave: handleManualRemarkChange,
+      onClose: () => setRemarkEditKey(null)
+    }),
     isSigningThisRow && E("tr", { key: `${rowKey}-sig` }, E("td", { colSpan: cells.length, className: "px-3 pb-2" },
       E(SignatureCapture, {
         user: session,
@@ -260,6 +350,7 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
 // column included since there's no grouping header to imply it. ----
 function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
   const [signingKey, setSigningKey] = React.useState(null);
+  const [remarkEditKey, setRemarkEditKey] = React.useState(null);
   const headers = ["Sample", "Client", "Reference", "Test Type", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
   const colWidths = ["12%", "14%", "14%", "13%", "15%", ...(showSystemRemark ? ["20%"] : []), "12%"];
   if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now.");
@@ -271,7 +362,7 @@ function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, refer
       ))),
       E("tbody", null, rows.map(row => E(StageRow, {
         key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
-        setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: true, signingKey, setSigningKey
+        setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: true, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey
       })))
     )
   );
@@ -283,6 +374,9 @@ function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, refer
 // only) alongside the same per-row actions Flat View has. ----
 function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
   const [signingKey, setSigningKey] = React.useState(null);
+  const [remarkEditKey, setRemarkEditKey] = React.useState(null);
+  const [collapsedBuckets, setCollapsedBuckets] = React.useState({});
+  const MIN_VISIBLE_WHEN_COLLAPSED = 3;
   const buckets = React.useMemo(() => groupRowsByBatch(rows, testRecords, subBatches), [rows, testRecords, subBatches]);
   return E("div", null,
     !buckets.length && E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now."),
@@ -290,6 +384,13 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
       const activeSamples = bucket.rows.filter(r => !isTestOnHold(r.sample, r.testTypeId)).map(r => r.sample);
       const headers = ["Sample", "Client", "Reference", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
       const colWidths = ["14%", "16%", "16%", "17%", ...(showSystemRemark ? ["22%"] : []), "15%"];
+      const isCollapsible = bucket.rows.length > MIN_VISIBLE_WHEN_COLLAPSED;
+      const isCollapsed = isCollapsible && !!collapsedBuckets[bucket.key];
+      const visibleRows = isCollapsed ? bucket.rows.slice(0, MIN_VISIBLE_WHEN_COLLAPSED) : bucket.rows;
+      const hiddenCount = bucket.rows.length - visibleRows.length;
+      function toggleCollapse() {
+        setCollapsedBuckets(prev => ({ ...prev, [bucket.key]: !prev[bucket.key] }));
+      }
       function doBulkMarkReviewed() {
         bulkMarkReviewed(activeSamples, bucket.testTypeId, bucket.testTypeName, session, setSamples, notify);
       }
@@ -303,20 +404,35 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
       return E(SectionCard, {
         key: bucket.key,
         title: `${bucket.label} — ${bucket.testTypeName}`,
-        subtitle: `${bucket.rows.length} sample(s)${activeSamples.length !== bucket.rows.length ? ` · ${bucket.rows.length - activeSamples.length} on hold` : ""}`,
-        className: "mb-3"
+        className: "mb-3",
+        right: isCollapsible && E("button", {
+          type: "button",
+          onClick: toggleCollapse,
+          className: "flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded",
+          style: { color: C.teal, border: `1px solid ${C.border}` }
+        },
+          E(Icon, { name: isCollapsed ? "chevronRight" : "chevronDown", size: 11 }),
+          isCollapsed ? `Expand (${bucket.rows.length})` : "Collapse"
+        )
       },
+        E("div", { className: "text-[11px] mb-2", style: { color: C.muted } },
+          `${bucket.rows.length} sample(s)${activeSamples.length !== bucket.rows.length ? ` · ${bucket.rows.length - activeSamples.length} on hold` : ""}`
+        ),
         E("div", null,
           E("table", { className: "w-full text-left table-fixed" },
             E("colgroup", null, colWidths.map((w, i) => E("col", { key: i, style: { width: w } }))),
             E("thead", null, E("tr", null, headers.map(h =>
               E("th", { key: h, className: "px-2 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
             ))),
-            E("tbody", null, bucket.rows.map(row => E(StageRow, {
+            E("tbody", null, visibleRows.map(row => E(StageRow, {
               key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
-              setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: false, signingKey, setSigningKey
+              setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: false, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey
             })))
           )
+        ),
+        isCollapsed && hiddenCount > 0 && E("div", { className: "text-[11px] text-center py-1.5" },
+          E("span", { style: { color: C.muted } }, `+${hiddenCount} more sample(s) hidden — `),
+          E("button", { type: "button", className: "underline font-medium", style: { color: C.teal }, onClick: toggleCollapse }, "show all")
         ),
         activeSamples.length > 0 && E("div", { className: "flex flex-wrap gap-2 mt-2" },
           stage === "review" && E(Button, { size: "sm", onClick: doBulkMarkReviewed }, E(Icon, { name: "check", size: 12 }), `Mark Reviewed — whole batch (${activeSamples.length})`),
@@ -520,6 +636,7 @@ function ResultsWorkflowTab({
     active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, references, goToTestEntry }),
     active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
     active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
-    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample })
+    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
+    E(ScrollTopBottomButtons)
   );
 }
