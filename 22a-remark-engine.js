@@ -63,9 +63,12 @@ function hasLimit(v) {
  * generateResultRemark(result, parameterConfig, isDiluted)
  *
  * @param {number|string} result - the final calculated/entered result value.
- * @param {object} parameterConfig - limits from the Parameter record:
+ * @param {object|null} parameterConfig - limits from the Parameter record:
  *   { lod, loq, minDetection, maxDetection, refLimitMin, refLimitMax }
  *   Any field may be "" / null / undefined if that limit isn't configured.
+ *   Pass null (not {}) when the Parameter entity itself couldn't be
+ *   resolved/hydrated at all — that renders as "Pending Parameter Match"
+ *   rather than being treated as "matched, nothing configured".
  * @param {boolean} isDiluted - whether dilution was applied for the batch/
  *   record this result belongs to. NOTE: this is a per-record flag, not a
  *   per-sample one — a batch can be marked "Dilution Required" while only
@@ -76,13 +79,24 @@ function hasLimit(v) {
  * @returns {{ remark: string, flag: string, displayValue: string|null, ruleId: string }}
  */
 function generateResultRemark(result, parameterConfig, isDiluted) {
-  const cfg = parameterConfig || {};
   const num = result === "" || result === null || result === undefined ? NaN : Number(result);
 
   // ---- guard: nothing to evaluate yet ----
   if (!Number.isFinite(num)) {
     return { remark: "Pending Result", flag: REMARK_FLAGS.UNKNOWN, displayValue: null, ruleId: "no_result" };
   }
+  // ---- guard: the Parameter entity itself couldn't be hydrated/joined at
+  // all (no linked Parameter found for this Test Type, or it was deleted).
+  // This is deliberately a DIFFERENT case from "matched, but nobody filled
+  // in any limits yet" below — collapsing the two used to mean a genuinely
+  // missing Parameter silently fell through to showing the raw result value
+  // next to a vague message, which read as if the raw value WAS the
+  // validated remark. Bail out here, before touching any limit field, so a
+  // missing Parameter can never be mistaken for a validated result. ----
+  if (!parameterConfig) {
+    return { remark: "Pending Parameter Match", flag: REMARK_FLAGS.UNKNOWN, displayValue: null, ruleId: "no_parameter" };
+  }
+  const cfg = parameterConfig;
   // ---- guard: parameter has no Limits configured at all — nothing to
   // validate against, so say so instead of silently claiming "Normal". ----
   const anyLimitConfigured = [cfg.lod, cfg.loq, cfg.minDetection, cfg.maxDetection, cfg.refLimitMin, cfg.refLimitMax].some(hasLimit);
@@ -197,18 +211,26 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
 // Parameter's Limits apply to a given result row by name (falling back to
 // unit, then to "the only one linked") rather than requiring a rigid 1:1 id
 // match that the data model doesn't actually guarantee.
+// A Test Type now reports exactly one Parameter (Test Type Builder enforces
+// a single linked Parameter — see 12-testtypes-ui.js's ParameterLinker), so
+// resolving which Parameter's Limits apply to a result row is a direct
+// id-based join in the common case: no name-guessing, no ambiguity. The
+// name/unit matching below only exists for LEGACY data saved before that
+// single-Parameter rule existed, where linkedParameterIds may still carry
+// more than one id.
 function resolveParameterConfig(resultItem, testType, parameters) {
   const linked = (testType?.linkedParameterIds || [])
     .map(id => (parameters || []).find(p => p.id === id))
     .filter(Boolean);
   if (!linked.length) return null;
+  if (linked.length === 1) return linked[0]; // direct id-based join — the normal case
+  // ---- legacy fallback: more than one linked id on this Test Type ----
   const name = (resultItem?.name || "").trim().toLowerCase();
   const byName = linked.find(p =>
     (p.name || "").trim().toLowerCase() === name ||
     (p.shortName || "").trim().toLowerCase() === name
   );
   if (byName) return byName;
-  if (linked.length === 1) return linked[0];
   const unit = (resultItem?.unit || "").trim().toLowerCase();
   if (unit) {
     const byUnit = linked.find(p => (p.unit || "").trim().toLowerCase() === unit);
@@ -242,7 +264,7 @@ function evaluateSampleResultsForTest(sample, testTypeId, testTypes, parameters,
     // reported as "Pending Result" by generateResultRemark's guard clause.
     .map(r => {
       const parameterConfig = resolveParameterConfig(r, testType, parameters);
-      const evalResult = generateResultRemark(r.value, parameterConfig || {}, isDiluted);
+      const evalResult = generateResultRemark(r.value, parameterConfig, isDiluted);
       return {
         paramId: r.paramId,
         name: r.name,
