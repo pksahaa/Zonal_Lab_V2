@@ -82,17 +82,17 @@ function sampleStatusMeta(key) {
 // states (on_hold / rejected / cancelled) are reachable from any active
 // status and, for on_hold, return to whatever status preceded it.
 const FORWARD_FLOW = {
-  registered: ["received", "cancelled"],
-  received: ["assigned", "on_hold", "cancelled"],
-  assigned: ["in_progress", "on_hold"],
-  in_progress: ["results_entered", "on_hold"],
+  registered: ["received", "on_hold", "rejected", "cancelled"],
+  received: ["assigned", "on_hold", "rejected", "cancelled"],
+  assigned: ["in_progress", "on_hold", "rejected", "cancelled"],
+  in_progress: ["results_entered", "on_hold", "rejected", "cancelled"],
   results_entered: ["under_review", "in_progress"],
   under_review: ["approved", "rejected", "in_progress"],
   approved: ["released", "under_review"],
   released: [],
   on_hold: [],
   // resumes to `sample.preHoldStatus`, offered separately in the UI
-  rejected: ["in_progress"],
+  rejected: [],
   cancelled: []
 };
 function nextAllowedStatuses(sample) {

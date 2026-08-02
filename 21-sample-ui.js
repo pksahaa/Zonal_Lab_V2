@@ -781,6 +781,7 @@ function SampleDetail({
   const [editing, setEditing] = React.useState(false);
   const [editForm, setEditForm] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [custodyAction, setCustodyAction] = React.useState(null); // target status string ("on_hold"|"rejected"|"cancelled") | null
   const canEdit = perms.canRegister && sample.status !== "released";
   const canDelete = perms.canRegister && (sample.linkedTestRecordIds || []).length === 0;
   function startEdit() {
@@ -1044,6 +1045,27 @@ function SampleDetail({
     style: {
       color: C.ink
     }
+  }, "Sample Details"), /*#__PURE__*/React.createElement("div", {
+    className: "grid gap-x-4 gap-y-1.5",
+    style: { gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }
+  }, [
+    ["Collection Date", sample.collectionDate],
+    ["Received Date", sample.receivedDate],
+    ["Collected By", sample.collectedBy],
+    ["District", sample.district],
+    ["Upazila / City Corp", sample.upazila],
+    ["Union / Pourashava", sample.union],
+    ["Site Name/Village", sample.village],
+    ["Father's / Husband's Name", sample.fatherHusbandName],
+    ["Water Point Type", sample.waterPointType === "Other" ? sample.waterPointTypeOther : sample.waterPointType]
+  ].map(([label, value]) => /*#__PURE__*/React.createElement("div", { key: label },
+    /*#__PURE__*/React.createElement("div", { className: "text-[10px]", style: { color: C.muted } }, label),
+    /*#__PURE__*/React.createElement("div", { className: "text-xs", style: { color: C.ink } }, value || "—")
+  )))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-semibold mb-1",
+    style: {
+      color: C.ink
+    }
   }, "Requested Tests"), /*#__PURE__*/React.createElement("div", {
     className: "grid gap-1.5"
   }, sample.requestedTests.map(t => {
@@ -1149,7 +1171,7 @@ function SampleDetail({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "user",
     size: 12
-  }), "Assign")), !!manualAllowedNext.length && !["received", "results_entered", "under_review"].includes(sample.status) && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }), "Assign")), !!manualAllowedNext.length && !["results_entered", "under_review"].includes(sample.status) && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-semibold mb-1",
     style: {
       color: C.ink
@@ -1160,8 +1182,25 @@ function SampleDetail({
     key: s,
     size: "sm",
     variant: "outline",
-    onClick: () => guardedUpdate(() => transitionSample(sample, s, {}, session), `Status updated to ${sampleStatusMeta(s).label}.`)
-  }, sampleStatusMeta(s).label)))), step && /*#__PURE__*/React.createElement("div", {
+    onClick: () => {
+      if (SAMPLE_CUSTODY_ACTIONS[s]) {
+        setCustodyAction(s);
+      } else {
+        guardedUpdate(() => transitionSample(sample, s, {}, session), `Status updated to ${sampleStatusMeta(s).label}.`);
+      }
+    }
+  }, sampleStatusMeta(s).label)))), custodyAction && /*#__PURE__*/React.createElement(SampleCustodyActionModal, {
+    sample: sample,
+    action: custodyAction,
+    onClose: () => setCustodyAction(null),
+    onConfirm: reason => {
+      guardedUpdate(
+        () => transitionSample(sample, custodyAction, { notes: reason || undefined }, session),
+        `${sample.sampleCode} ${SAMPLE_CUSTODY_ACTIONS[custodyAction].verb}.`
+      );
+      setCustodyAction(null);
+    }
+  }), step && /*#__PURE__*/React.createElement("div", {
     className: "text-xs p-2 rounded flex items-center justify-between gap-2",
     style: {
       background: C.bg,
@@ -1416,11 +1455,6 @@ function BatchRegistrationForm({
     return "";
   }
   function goToStep2() {
-    const validationError = validateStep1();
-    if (validationError) {
-      setErr(validationError);
-      return;
-    }
     setErr("");
     setStep1Confirmed(true);
     setStep(2);
@@ -1428,8 +1462,15 @@ function BatchRegistrationForm({
 
   async function submit() {
     if (saving) return;
+    const step1Error = validateStep1();
+    if (step1Error) {
+      setErr(step1Error);
+      setStep(1);
+      return;
+    }
     if (rows.every(r => !r.customerName.trim() && !r.village.trim())) {
       setErr("Fill in at least one sample row (Customer Name or Site Name/Village).");
+      setStep(2);
       return;
     }
     const validRows = rows.filter(r => r.customerName.trim() || r.village.trim());
@@ -1509,6 +1550,12 @@ function BatchRegistrationForm({
     value: shared.sampleType,
     onChange: v => setShared({ ...shared, sampleType: v }),
     options: ["Drinking Water", "Surface Water", "Wastewater", "Groundwater", "Other"].map(m => ({ value: m, label: m }))
+  }), /*#__PURE__*/React.createElement(SelectField, {
+    simple: true,
+    label: "Priority",
+    value: shared.priority,
+    onChange: v => setShared({ ...shared, priority: v }),
+    options: ["Routine", "Urgent"].map(m => ({ value: m, label: m }))
   }), /*#__PURE__*/React.createElement(TextField, {
     simple: true,
     label: "Collection Date",
@@ -1714,6 +1761,7 @@ const SAMPLE_TABLE_COLUMNS = [
   { key: "upazila", label: "Upazilla" },
   { key: "ward", label: "Ward/Union" },
   { key: "sampleType", label: "Sample Type" },
+  { key: "collectedBy", label: "Collected By" },
   { key: "latLong", label: "Lat/Long" },
   { key: "waterPointType", label: "Type of Water Point" },
   { key: "priority", label: "Priority" },
@@ -1810,6 +1858,59 @@ function ScrollNavButtons({ onTop, onBottom }) {
   );
 }
 
+// ---- Individual-sample custody actions: Hold / Reject / Cancel ----
+// These are chain-of-custody decisions about the physical sample, made
+// BEFORE (or independent of) any testing — distinct from the per-parameter
+// "Hold" inside Results Workflow, which pauses one already-tested parameter
+// mid-review. A sample held/rejected/cancelled here is excluded from
+// Analytical Batch creation and Add Test Record entirely (see
+// sampleBlockedFromTesting in 16-sub-batch.js) — so no reagent is ever
+// consumed for it. Reject and Cancel require a cause and, per FORWARD_FLOW,
+// have no path forward again once set.
+const SAMPLE_CUSTODY_ACTIONS = {
+  on_hold: { label: "Hold", verb: "put on hold", reasonRequired: false, icon: "warning" },
+  rejected: { label: "Reject", verb: "rejected", reasonRequired: true, icon: "ban" },
+  cancelled: { label: "Cancel", verb: "cancelled", reasonRequired: true, icon: "x" }
+};
+function SampleCustodyActionModal({ sample, action, onClose, onConfirm }) {
+  const meta = SAMPLE_CUSTODY_ACTIONS[action];
+  const [reason, setReason] = React.useState("");
+  const [err, setErr] = React.useState("");
+  function confirm() {
+    if (meta.reasonRequired && !reason.trim()) {
+      setErr(`A cause is required to ${meta.label.toLowerCase()} a sample.`);
+      return;
+    }
+    onConfirm(reason.trim());
+  }
+  return /*#__PURE__*/React.createElement(Modal, {
+    title: `${meta.label} — ${sample.sampleCode}`,
+    onClose
+  },
+    /*#__PURE__*/React.createElement("p", { className: "text-xs mb-3", style: { color: C.muted } },
+      `This sample will be ${meta.verb}`,
+      action !== "on_hold" ? " and will not proceed to any further stage — it stops here permanently." :
+        " — it will be excluded from Analytical Batch creation and Add Test Record until resumed, and won't consume any inventory while held."
+    ),
+    /*#__PURE__*/React.createElement("label", { className: "flex flex-col gap-1 text-xs mb-1", style: { color: C.muted } },
+      `Cause / reason${meta.reasonRequired ? " (required)" : " (optional)"}`,
+      /*#__PURE__*/React.createElement("textarea", {
+        className: "border rounded px-2 py-1.5 text-sm",
+        style: { borderColor: C.border, minHeight: 70 },
+        value: reason,
+        onChange: e => { setReason(e.target.value); setErr(""); },
+        placeholder: action === "on_hold" ? "e.g. awaiting client confirmation, insufficient sample volume…" : "e.g. broken container, contamination suspected, duplicate entry…"
+      })
+    ),
+    err && /*#__PURE__*/React.createElement("div", { className: "text-xs mb-2", style: { color: C.warn } }, err),
+    /*#__PURE__*/React.createElement("div", { className: "flex justify-end gap-2 mt-3" },
+      /*#__PURE__*/React.createElement(Button, { variant: "ghost", size: "sm", onClick: onClose }, "Cancel"),
+      /*#__PURE__*/React.createElement(Button, { variant: "danger", size: "sm", onClick: confirm },
+        /*#__PURE__*/React.createElement(Icon, { name: meta.icon, size: 12 }), meta.label)
+    )
+  );
+}
+
 // ---- main tab: list + registration + detail ----
 function SamplesTab({
   samples,
@@ -1878,6 +1979,7 @@ function SamplesTab({
   // naturally since `filtered` is sorted by createdAt desc).
   const [recentlyAddedIds, setRecentlyAddedIds] = React.useState(new Set());
   const [openMenuId, setOpenMenuId] = React.useState(null);
+  const [custodyAction, setCustodyAction] = React.useState(null); // { sample, action } | null
   const perms = permissionsFor(session.role);
   const openSample = samples.find(s => s.id === openId) || null;
   const filtered = samples.filter(s => {
@@ -2082,6 +2184,21 @@ function SamplesTab({
   function renderRowActions(s) {
     const ref = s.referenceId ? findReferenceById(references, s.referenceId) : null;
     const menuOpen = openMenuId === s.id;
+    const allowedNext = nextAllowedStatuses(s);
+    const isOnHold = s.status === "on_hold";
+    const canHold = !isOnHold && allowedNext.includes("on_hold");
+    const canReject = allowedNext.includes("rejected");
+    const canCancel = allowedNext.includes("cancelled");
+    function resumeFromHold() {
+      try {
+        const next = transitionSample(s, allowedNext[0], { notes: "Resumed from hold." }, session);
+        setSamples(prev => prev.map(x => x.id === s.id ? next : x));
+        notify?.(`${s.sampleCode} resumed.`, "ok");
+      } catch (e) {
+        notify?.(e.message, "warn");
+      }
+      setOpenMenuId(null);
+    }
     return /*#__PURE__*/React.createElement("div", {
       className: "relative inline-block text-left",
       onClick: e => e.stopPropagation()
@@ -2095,7 +2212,7 @@ function SamplesTab({
       size: 15,
       color: C.muted
     })), menuOpen && /*#__PURE__*/React.createElement("div", {
-      className: "absolute right-0 top-full mt-1 w-48 rounded-lg shadow-lg py-1",
+      className: "absolute right-0 top-full mt-1 w-52 rounded-lg shadow-lg py-1",
       style: {
         background: "#fff",
         border: `1px solid ${C.border}`,
@@ -2142,7 +2259,33 @@ function SamplesTab({
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "link",
       size: 12
-    }), "Copy Sample ID")));
+    }), "Copy Sample ID"), (isOnHold || canHold || canReject || canCancel) && /*#__PURE__*/React.createElement("div", {
+      className: "h-px my-1",
+      style: { background: C.border }
+    }), isOnHold && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover:bg-black/5",
+      style: { color: C.ink },
+      onClick: resumeFromHold
+    }, /*#__PURE__*/React.createElement(Icon, { name: "check", size: 12 }), "Resume (take off hold)"),
+    canHold && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover:bg-black/5",
+      style: { color: C.warn },
+      onClick: () => { setCustodyAction({ sample: s, action: "on_hold" }); setOpenMenuId(null); }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "warning", size: 12 }), "Hold"),
+    canReject && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover:bg-black/5",
+      style: { color: C.warn },
+      onClick: () => { setCustodyAction({ sample: s, action: "rejected" }); setOpenMenuId(null); }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "ban", size: 12 }), "Reject"),
+    canCancel && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover:bg-black/5",
+      style: { color: C.warn },
+      onClick: () => { setCustodyAction({ sample: s, action: "cancelled" }); setOpenMenuId(null); }
+    }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 12 }), "Cancel")));
   }
   function renderSampleRow(s, indented) {
     const isNew = recentlyAddedIds.has(s.id);
@@ -2187,6 +2330,9 @@ function SamplesTab({
       sampleType: /*#__PURE__*/React.createElement("td", {
         className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
       }, s.sampleType || "—"),
+      collectedBy: /*#__PURE__*/React.createElement("td", {
+        className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
+      }, s.collectedBy || "—"),
       latLong: /*#__PURE__*/React.createElement("td", {
         className: "px-2 py-1.5 whitespace-nowrap", style: { color: C.muted }
       }, latLong),
@@ -2459,6 +2605,20 @@ function SamplesTab({
   }))))))), /*#__PURE__*/React.createElement("div", { ref: sampleListBottomRef }), /*#__PURE__*/React.createElement(ScrollNavButtons, {
     onTop: scrollSampleListToTop,
     onBottom: scrollSampleListToBottom
+  }), custodyAction && /*#__PURE__*/React.createElement(SampleCustodyActionModal, {
+    sample: custodyAction.sample,
+    action: custodyAction.action,
+    onClose: () => setCustodyAction(null),
+    onConfirm: reason => {
+      try {
+        const next = transitionSample(custodyAction.sample, custodyAction.action, { notes: reason || undefined }, session);
+        setSamples(prev => prev.map(x => x.id === custodyAction.sample.id ? next : x));
+        notify?.(`${custodyAction.sample.sampleCode} ${SAMPLE_CUSTODY_ACTIONS[custodyAction.action].verb}.`, custodyAction.action === "on_hold" ? "warn" : "warn");
+      } catch (e) {
+        notify?.(e.message, "warn");
+      }
+      setCustodyAction(null);
+    }
   })), sampleSubTab === "subBatches" && /*#__PURE__*/React.createElement(SubBatchBuilder, {
     samples: samples,
     setSamples: setSamples,
