@@ -343,7 +343,7 @@ function ClientPartFields({
     }
   }, /*#__PURE__*/React.createElement(TextField, {
     simple: true,
-    label: /*#__PURE__*/React.createElement(React.Fragment, null, "Tracking No. ", /*#__PURE__*/React.createElement("span", {
+    label: /*#__PURE__*/React.createElement("span", null, "Tracking No. ", /*#__PURE__*/React.createElement("span", {
       style: { color: C.warn }
     }, "*")),
     value: form.trackingNo,

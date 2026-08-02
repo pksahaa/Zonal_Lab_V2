@@ -40,11 +40,17 @@ const REMARK_FLAGS = {
   UNKNOWN: "UNKNOWN" // no limits configured / no result yet — informational only
 };
 
+// Tone is driven by drinkability against the Max Reference Limit, not by
+// which sub-rule fired: anything at/below that limit (ND, trace, below-min,
+// below-reference, normal) is safe to show green — only a result that
+// actually exceeds the Max Reference Limit (with or without dilution) is
+// red. ACTION_REQUIRED (raw result over Max Detection Limit, dilution
+// pending) stays red too — it's not yet confirmed to be within limit.
 const REMARK_FLAG_TONE = {
   NORMAL: "ok",
-  INFO: "warn",
-  WARNING: "warn",
-  DEFICIENT: "warn",
+  INFO: "ok",
+  WARNING: "ok",
+  DEFICIENT: "ok",
   EXCEEDED: "danger",
   ACTION_REQUIRED: "danger",
   UNKNOWN: "muted"
@@ -147,14 +153,14 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
       return {
         remark: "Exceeds Reference Limit (Diluted)",
         flag: REMARK_FLAGS.EXCEEDED, // red — a genuine out-of-spec value even after dilution
-        displayValue: fmtNum(num),
+        displayValue: refLimitMax !== null ? `max: ${fmtNum(refLimitMax)}` : null,
         ruleId: "diluted_exceeds_reference"
       };
     }
     return {
       remark: "Within Reference Limit (Diluted)",
       flag: REMARK_FLAGS.NORMAL,
-      displayValue: fmtNum(num),
+      displayValue: null, // within limit — the value already reads fine in the Result column
       ruleId: "diluted_within_reference"
     };
   }
@@ -165,7 +171,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Exceeds Max Detection Limit! Re-test with Dilution.",
       flag: REMARK_FLAGS.ACTION_REQUIRED,
-      displayValue: fmtNum(num),
+      displayValue: `max detection: ${fmtNum(maxDetection)}`,
       ruleId: "exceeds_max_detection"
     };
   }
@@ -183,7 +189,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Trace Amount Present (Below Quantitation Limit)",
       flag: REMARK_FLAGS.INFO,
-      displayValue: fmtNum(num),
+      displayValue: `LOQ: ${fmtNum(loq)}`,
       ruleId: "below_loq"
     };
   }
@@ -191,7 +197,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Below Minimum Operating Limit",
       flag: REMARK_FLAGS.WARNING,
-      displayValue: fmtNum(num),
+      displayValue: `min: ${fmtNum(minDetection)}`,
       ruleId: "below_min_detection"
     };
   }
@@ -203,7 +209,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Exceeds Standard Reference Limit",
       flag: REMARK_FLAGS.EXCEEDED,
-      displayValue: fmtNum(num),
+      displayValue: `max: ${fmtNum(refLimitMax)}`,
       ruleId: "exceeds_reference"
     };
   }
@@ -211,14 +217,14 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Below Standard Reference Limit",
       flag: REMARK_FLAGS.DEFICIENT,
-      displayValue: fmtNum(num),
+      displayValue: `min: ${fmtNum(refLimitMin)}`,
       ruleId: "below_reference"
     };
   }
   return {
     remark: "Within Acceptable Range",
     flag: REMARK_FLAGS.NORMAL,
-    displayValue: fmtNum(num),
+    displayValue: null, // within limit — the value already reads fine in the Result column
     ruleId: "within_range"
   };
 }

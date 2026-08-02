@@ -208,8 +208,15 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
     E("td", { key: "ref", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.muted }, title: ref ? referenceDisplayLabel(ref) : "" }, ref ? referenceDisplayLabel(ref) : "—")
   ];
   if (showTestTypeColumn) cells.push(E("td", { key: "tt", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.ink }, title: testTypeName }, testTypeName));
-  const resultText = resultInfo && resultInfo.results && resultInfo.results.length
-    ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
+  const resultRows = resultInfo && resultInfo.results ? resultInfo.results.filter(r => r.value != null) : [];
+  // Only prefix each value with its parameter name when a row has more than
+  // one result — with a single result, the Test Type column already names
+  // the parameter (e.g. "Arsenic"), so repeating its short name ("As:")
+  // right next to the value is redundant.
+  const resultText = resultRows.length
+    ? (resultRows.length > 1
+        ? resultRows.map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ")
+        : resultRows.map(r => `${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ")) || "—"
     : "—";
   cells.push(E("td", { key: "result", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.ink }, title: resultText }, resultText));
   if (showSystemRemark) cells.push(E("td", { key: "remark", className: "px-2 py-1.5" },
