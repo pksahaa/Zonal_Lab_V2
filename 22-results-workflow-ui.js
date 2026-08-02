@@ -162,11 +162,11 @@ function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notif
     setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} resumed for ${testTypeName} — back in the normal queue.`, "ok");
   }
-  return E("div", { className: "flex flex-wrap items-center gap-1.5" },
+  return E("div", { className: "flex items-center gap-1" },
     held
-      ? E(Button, { key: "resume", size: size || "sm", variant: "outline", onClick: doResume }, "Resume")
-      : E(Button, { key: "hold", size: size || "sm", variant: "outline", onClick: doHold }, "On Hold"),
-    E(Button, { key: "return", size: size || "sm", variant: "ghost", onClick: doReturn }, "Return to Analyst")
+      ? E(IconButton, { key: "resume", name: "check", color: C.ok, title: "Resume — back into the normal queue", onClick: doResume })
+      : E(IconButton, { key: "hold", name: "lock", color: C.warn, title: "On Hold — park in Awaiting Review", onClick: doHold }),
+    E(IconButton, { key: "return", name: "arrowLeft", color: C.danger, title: "Return to Analyst — back to pending testing, like a fresh sample", onClick: doReturn })
   );
 }
 
@@ -200,27 +200,26 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
     if (result.updated.length) notify?.(`${sample.sampleCode} released for ${testTypeName}.`, "ok");
   }
   const cells = [
-    E("td", { key: "sample", className: "px-3 py-1.5" },
-      E("button", { className: "text-xs font-semibold underline", style: { color: C.teal }, onClick: () => goToSample?.(sample.id) }, sample.sampleCode),
-      held && E("div", { className: "mt-0.5" }, E(Badge, { tone: "warn" }, "On Hold"))
+    E("td", { key: "sample", className: "px-2 py-1.5" },
+      E("button", { className: "text-xs font-semibold underline whitespace-nowrap", style: { color: C.teal }, onClick: () => goToSample?.(sample.id) }, sample.sampleCode),
+      held && E("div", { className: "mt-0.5" }, E(Badge, { tone: "warn" }, "Hold"))
     ),
-    E("td", { key: "client", className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, sample.clientName || "—"),
-    E("td", { key: "ref", className: "px-3 py-1.5 text-xs", style: { color: C.muted } }, ref ? referenceDisplayLabel(ref) : "—")
+    E("td", { key: "client", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.muted }, title: sample.clientName || "" }, sample.clientName || "—"),
+    E("td", { key: "ref", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.muted }, title: ref ? referenceDisplayLabel(ref) : "" }, ref ? referenceDisplayLabel(ref) : "—")
   ];
-  if (showTestTypeColumn) cells.push(E("td", { key: "tt", className: "px-3 py-1.5 text-xs", style: { color: C.ink } }, testTypeName));
-  cells.push(E("td", { key: "result", className: "px-3 py-1.5 text-xs", style: { color: C.ink } },
-    resultInfo && resultInfo.results && resultInfo.results.length
-      ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
-      : "—"
-  ));
-  if (showSystemRemark) cells.push(E("td", { key: "remark", className: "px-3 py-1.5" },
+  if (showTestTypeColumn) cells.push(E("td", { key: "tt", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.ink }, title: testTypeName }, testTypeName));
+  const resultText = resultInfo && resultInfo.results && resultInfo.results.length
+    ? resultInfo.results.filter(r => r.value != null).map(r => `${r.name}: ${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}`).join(", ") || "—"
+    : "—";
+  cells.push(E("td", { key: "result", className: "px-2 py-1.5 text-xs truncate max-w-[110px]", style: { color: C.ink }, title: resultText }, resultText));
+  if (showSystemRemark) cells.push(E("td", { key: "remark", className: "px-2 py-1.5" },
     E(SystemRemarkCell, { evaluated, manualRemark: getManualRemark(sample, testTypeId), onManualRemarkChange: handleManualRemarkChange, editable: !!setSamples })
   ));
-  cells.push(E("td", { key: "actions", className: "px-3 py-1.5" },
-    E("div", { className: "flex flex-wrap items-center gap-1.5" },
-      !held && stage === "review" && E(Button, { size: "sm", onClick: doMarkReviewed }, "Mark Reviewed"),
-      !held && stage === "approve" && E(Button, { size: "sm", onClick: () => setSigningKey(isSigningThisRow ? null : rowKey) }, "Final Approve / Reject"),
-      !held && stage === "release" && E(Button, { size: "sm", onClick: doRelease }, E(Icon, { name: "printer", size: 12 }), "Release"),
+  cells.push(E("td", { key: "actions", className: "px-2 py-1.5" },
+    E("div", { className: "flex items-center gap-1 whitespace-nowrap" },
+      !held && stage === "review" && E(IconButton, { name: "check", color: C.teal, title: "Mark Reviewed", onClick: doMarkReviewed }),
+      !held && stage === "approve" && E(IconButton, { name: "check", color: C.teal, title: "Final Approve / Reject", onClick: () => setSigningKey(isSigningThisRow ? null : rowKey) }),
+      !held && stage === "release" && E(IconButton, { name: "printer", color: C.teal, title: "Release", onClick: doRelease }),
       E(RowHoldReturnActions, { sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size: "sm" })
     )
   ));
@@ -255,11 +254,13 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
 function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
   const [signingKey, setSigningKey] = React.useState(null);
   const headers = ["Sample", "Client", "Reference", "Test Type", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
+  const colWidths = ["12%", "14%", "14%", "13%", "15%", ...(showSystemRemark ? ["20%"] : []), "12%"];
   if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now.");
-  return E("div", { className: "overflow-x-auto rounded-lg", style: { border: `1px solid ${C.border}` } },
-    E("table", { className: "w-full text-left" },
+  return E("div", { className: "rounded-lg", style: { border: `1px solid ${C.border}` } },
+    E("table", { className: "w-full text-left table-fixed" },
+      E("colgroup", null, colWidths.map((w, i) => E("col", { key: i, style: { width: w } }))),
       E("thead", null, E("tr", null, headers.map(h =>
-        E("th", { key: h, className: "px-3 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
+        E("th", { key: h, className: "px-2 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
       ))),
       E("tbody", null, rows.map(row => E(StageRow, {
         key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
@@ -281,6 +282,7 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
     buckets.map(bucket => {
       const activeSamples = bucket.rows.filter(r => !isTestOnHold(r.sample, r.testTypeId)).map(r => r.sample);
       const headers = ["Sample", "Client", "Reference", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
+      const colWidths = ["14%", "16%", "16%", "17%", ...(showSystemRemark ? ["22%"] : []), "15%"];
       function doBulkMarkReviewed() {
         bulkMarkReviewed(activeSamples, bucket.testTypeId, bucket.testTypeName, session, setSamples, notify);
       }
@@ -297,10 +299,11 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
         subtitle: `${bucket.rows.length} sample(s)${activeSamples.length !== bucket.rows.length ? ` · ${bucket.rows.length - activeSamples.length} on hold` : ""}`,
         className: "mb-3"
       },
-        E("div", { className: "overflow-x-auto" },
-          E("table", { className: "w-full text-left" },
+        E("div", null,
+          E("table", { className: "w-full text-left table-fixed" },
+            E("colgroup", null, colWidths.map((w, i) => E("col", { key: i, style: { width: w } }))),
             E("thead", null, E("tr", null, headers.map(h =>
-              E("th", { key: h, className: "px-3 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
+              E("th", { key: h, className: "px-2 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
             ))),
             E("tbody", null, bucket.rows.map(row => E(StageRow, {
               key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,

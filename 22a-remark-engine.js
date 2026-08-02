@@ -50,6 +50,25 @@ const REMARK_FLAG_TONE = {
   UNKNOWN: "muted"
 };
 
+// Short badge text keyed by ruleId, for compact table layouts (Awaiting
+// Review/Approve) — the full sentence is still always available as the
+// badge's hover title (see SystemRemarkBadge), nothing is lost, it just
+// doesn't need a wide column to render on one line.
+const REMARK_SHORT_LABEL = {
+  no_result: "Pending",
+  no_parameter: "No Parameter",
+  no_config: "No Limits Set",
+  diluted_exceeds_reference: "Exceeds (Diluted)",
+  diluted_within_reference: "Within (Diluted)",
+  exceeds_max_detection: "Re-test w/ Dilution",
+  below_lod: "ND (< LOD)",
+  below_loq: "Trace (< LOQ)",
+  below_min_detection: "Below Min.",
+  exceeds_reference: "Exceeds Limit",
+  below_reference: "Below Limit",
+  within_range: "Normal"
+};
+
 // ---------------- 2. Core evaluation logic (deliverable #1) ----------------
 // Small numeric helper — Limits fields default to "" (unset) on a Parameter
 // record (see ParameterForm in 12a-parameters-ui.js), so "" / null /
@@ -156,7 +175,7 @@ function generateResultRemark(result, parameterConfig, isDiluted) {
     return {
       remark: "Below Detection Limit (ND)",
       flag: REMARK_FLAGS.INFO,
-      displayValue: "< LOD",
+      displayValue: `< ${fmtNum(lod)}`,
       ruleId: "below_lod"
     };
   }
@@ -296,12 +315,15 @@ function setManualRemarkOnSample(sample, testTypeId, manualRemark) {
 }
 
 // ---------------- 5. Presentational pieces (deliverable #2/#3) ----------------
-// One flag badge, reusing the app's Badge primitive.
-function SystemRemarkBadge({ flag, remark }) {
+// One flag badge, reusing the app's Badge primitive. Shows the short label
+// (compact — fits a single-line table row); the full sentence is always the
+// hover title, so nothing is actually hidden, just not taking up column
+// width by default.
+function SystemRemarkBadge({ flag, remark, ruleId }) {
   return /*#__PURE__*/React.createElement(Badge, {
     tone: REMARK_FLAG_TONE[flag] || "muted",
     title: remark
-  }, remark);
+  }, REMARK_SHORT_LABEL[ruleId] || remark);
 }
 
 // The "System Remark" table cell: one auto-generated badge per evaluated
@@ -324,13 +346,13 @@ function SystemRemarkCell({ evaluated, manualRemark, onManualRemarkChange, edita
     }
   }
 
-  return React.createElement("div", { className: "flex flex-col gap-1 min-w-[180px]" },
+  return React.createElement("div", { className: "flex flex-col gap-1 min-w-0" },
     evaluated.map((ev, i) => React.createElement("div", {
       key: ev.paramId || i,
       className: "flex items-center gap-1.5 flex-wrap"
     },
       evaluated.length > 1 && React.createElement("span", { className: "text-[11px] font-medium", style: { color: C.muted } }, `${ev.name}:`),
-      React.createElement(SystemRemarkBadge, { flag: ev.flag, remark: ev.remark }),
+      React.createElement(SystemRemarkBadge, { flag: ev.flag, remark: ev.remark, ruleId: ev.ruleId }),
       ev.displayValue && React.createElement("span", { className: "text-[11px]", style: { color: C.muted } }, `(${ev.displayValue}${ev.unit ? ` ${ev.unit}` : ""})`)
     )),
     editable && (
