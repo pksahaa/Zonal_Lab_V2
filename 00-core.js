@@ -73,7 +73,13 @@ function applyTheme(mode) {
   Object.assign(C, mode === "dark" ? DARK_PALETTE : LIGHT_PALETTE);
 }
 
-// ---------------- Minimal i18n ----------------
+// Bump this whenever a fix ships, and it shows in the header (bottom-right
+// of the title block) — lets anyone confirm at a glance whether the files
+// in their browser are actually the updated ones, since local file:// pages
+// are notorious for silently serving a cached copy of the old JS after you
+// overwrite the files on disk.
+const APP_BUILD = "2026-08-04.8 (Guest permission fix + per-user permission overrides)";
+
 const STRINGS = {
   en: {
     appName: "Zonal Water Quality Lab",
@@ -87,6 +93,7 @@ const STRINGS = {
     addTest: "Add Test Record",
     testRecords: "Test Records",
     reports: "Reports",
+    archive: "Archive",
     logOut: "Log Out",
     welcome: "Welcome back",
     welcomeSub: "A quick snapshot of stock levels, equipment health, and recent testing activity."
@@ -103,6 +110,7 @@ const STRINGS = {
     addTest: "টেস্ট রেকর্ড যোগ করুন",
     testRecords: "টেস্ট রেকর্ড",
     reports: "রিপোর্ট",
+    archive: "আর্কাইভ",
     logOut: "লগ আউট",
     welcome: "স্বাগতম",
     welcomeSub: "স্টক লেভেল, যন্ত্রপাতির অবস্থা এবং সাম্প্রতিক টেস্টিং কার্যক্রমের সংক্ষিপ্ত চিত্র।"
@@ -455,6 +463,40 @@ function Icon({
     case "minimize":
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
         d: "M9 3v3a2 2 0 0 1-2 2H4M21 9h-3a2 2 0 0 1-2-2V4M15 21v-3a2 2 0 0 1 2-2h3M4 15h3a2 2 0 0 1 2 2v3"
+      }));
+    case "archive":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("rect", {
+        x: "3",
+        y: "4",
+        width: "18",
+        height: "4",
+        rx: "1"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M10 12h4"
+      }));
+    case "restore":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M3 12a9 9 0 1 0 3-6.7"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M3 4v5h5"
+      }));
+    case "users":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"
+      }), /*#__PURE__*/React.createElement("circle", {
+        cx: "9",
+        cy: "7",
+        r: "4"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M23 21v-2a4 4 0 0 0-3-3.87"
+      }), /*#__PURE__*/React.createElement("path", {
+        d: "M16 3.13a4 4 0 0 1 0 7.75"
+      }));
+    case "shield":
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M12 2l8 3.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6L12 2z"
       }));
     default:
       return null;

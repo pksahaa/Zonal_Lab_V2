@@ -617,3 +617,186 @@ top of cramped per-sample rows:
   changes to `20-sample-model.js`, `19-reference-model.js`, or any other
   file — `onCreate(shared, validRows, reference)`'s shape is identical to
   before, so nothing downstream needed touching.
+
+
+## Per-user overrides now cover Samples (Register / Assign / Review / Approve / Release)
+
+The Module × Action permission matrix (Users → Permission Matrix, plus the
+"Custom permissions for this user" editor on each user) previously covered
+everything *except* the Sample Lifecycle's own register/assign/review/
+approve/release permissions — those were still role-only
+(`ROLE_PERMISSIONS` / `permissionsFor(role)` in `20-sample-model.js`), with
+no way to grant or revoke one person's access without moving them to a
+different role.
+
+- **`permissionsFor()`** (`20-sample-model.js`) now takes
+  `(permissionMatrix, session)` instead of a bare role string. Resolution
+  order matches every other module: Administrator always full access →
+  `session.overrides.samples.<action>` (per-user override) → the matrix's
+  `permissionMatrix[role].samples.<action>` (role default) → a defensive
+  fallback to the original `ROLE_PERMISSIONS` constant if a role is
+  somehow missing a `samples` entry. All three call sites (`SamplesTab`
+  and `SampleDetail` in `21-sample-ui.js`, `ResultsWorkflowTab` in
+  `22-results-workflow-ui.js`) now take `permissionMatrix` as a prop,
+  threaded down from `AppRoot`/`LabApp` in `99-app.js`.
+- **`41-rbac-ui.js`**: added a `SAMPLE_MODULE` definition (Register /
+  Assign / Enter Results / Review / Approve / Release — a different
+  action set than the shared View/Create/Edit/Delete columns, so it's
+  rendered as its own small grid rather than forced into
+  `PERMISSION_MODULES`). Both `PermissionMatrixPanel` (role-level
+  defaults) and `UserPermissionOverridesEditor` (per-user Allow/Deny/
+  Inherit) now show this second grid, using the exact same
+  `toggleCell()`/`cycle()`/`overrideCellState()` logic already used for
+  every other module — no new interaction pattern to learn.
+- **Migration**: `DEFAULT_PERMISSION_MATRIX[role].samples` is seeded from
+  the existing `ROLE_PERMISSIONS` values, so behavior for every role is
+  identical to before on a fresh install. For labs that already have a
+  `permissionMatrix` saved in localStorage (from before this change, so
+  missing the `samples` key entirely), `backfillSamplePermissions()` fills
+  it in from the same `ROLE_PERMISSIONS` defaults the first time the app
+  loads after updating — a no-op if it's already been through this once,
+  same idempotent-migration pattern used elsewhere in this app.
+- Verified end-to-end: created a Technician user with an explicit
+  per-user "Approve" override — Results Workflow correctly shows them the
+  "Awaiting Approval" queue (which a stock Technician never sees), while
+  Review/Release stayed hidden since those weren't overridden.
+
+
+## 2026-08-09 — RBAC enforcement audit: buttons that ignored permissions entirely
+
+Reported bug: turning a role's (or a per-user override's) edit/delete off
+for a module had no effect on several screens — the button still worked.
+Root cause was **not** in permission resolution (`can()` /
+`permissionsFor()` and their override logic were already correct — see the
+previous section's migration work) but in UI code that never called those
+functions at all. A permission can't do anything if nothing checks it.
+
+**Confirmed gaps, closed this round:**
+
+- **Inventory** (`11-inventory-ui.js`) — top-level Chemical/Glassware/
+  Equipment/Gas add/edit/delete were already gated, but everything nested
+  one level down was not: chemical **batch** edit/delete, glassware
+  **move actions** (To Analysis Room / To Store / Mark Broken — these had
+  no gate at all, not even a hidden one), equipment **history event**
+  edit/delete, and gas **cylinder** add/edit/delete/refill/mark-empty.
+  Also the three **Import Data** buttons (Chemicals/Glassware/Equipment)
+  and their `importChemicals`/`importGlassware`/`importEquipment`
+  functions — completely ungated.
+- **Test Configuration › Parameters** (`12a-parameters-ui.js`) — didn't
+  even receive `session`/`permissionMatrix` as props from
+  `TestConfigurationTab` (`12-testtypes-ui.js`), so Add/Edit/Delete
+  Parameter ran unconditionally for every role. Now shares the
+  `testTypes` module's permissions (Parameters lives inside Test
+  Configuration; it has no RBAC bucket of its own).
+- **Sub-Batches** (`21-sample-ui.js`, `SubBatchBuilder`) — same story:
+  `permissionMatrix` wasn't threaded in from `SamplesTab`, so
+  create/edit/delete and the tester-reassignment dropdown were wide open
+  regardless of the `subBatches` module's settings.
+- **Add Test Record** (`13-testrecords-ui.js`, `AddTestTab`) — had zero
+  permission checks, and worse, was reachable even when its nav tab was
+  hidden: `goToTestEntry()` (called from the Results Workflow "Upload
+  Results" queue, `99-app.js`) does a direct `setTab("addTest")`, which
+  bypasses the nav bar's own `can()` filter entirely since that filter
+  only hides the *button*, not programmatic tab switches. Fixed by
+  gating `handleSave` (covers both the create and the edit-via-row-Edit
+  path, using `testRecords.create`/`testRecords.edit` respectively) and
+  the **Upload Results (Excel)** bulk-fill button — the latter needed its
+  own gate because otherwise a blocked person could still open the modal
+  and fill the form from a spreadsheet; only the final Save was blocked,
+  which reads as "it worked" even though nothing was persisted.
+- **Archive** (`18-archive-ui.js`) Restore, **Reports**
+  (`17-report-generator.js`) Generate & Print, **Sample** edit/delete and
+  **Register/Import Sample** (`21-sample-ui.js`) — all previously gated
+  correctly, converted to the new pattern below for consistency.
+
+**The fix — two small shared helpers, not a rewrite of every screen:**
+
+- **`permGate(matrix, session, moduleKey, action, notify, actionLabel)`**
+  (`41-rbac-ui.js`, next to `can()`) — for the generic Module × Action
+  matrix. Returns `{ allowed, visible, guard(handler) }`.
+- **`sampleActionGate(perms, actionKey, session, notify, actionLabel)`**
+  (`20-sample-model.js`, next to `permissionsFor()`) — same shape, built
+  on the Sample Lifecycle's fine-grained `canRegister`/`canReview`/
+  `canApprove`/`canRelease`/etc. booleans instead of the generic matrix.
+
+Both encode the same rule, which is also this round's UX decision:
+
+- **Guest** is meant to browse the whole app like an Administrator would —
+  every button and every tab stays visible, nothing hidden, including
+  ones it can't use. But `guard(handler)` only calls `handler` if
+  `allowed` is actually true; otherwise it shows a toast ("Guest access
+  can't … — this login is view-only for this action.") and does nothing.
+  So `visible = allowed || role === "Guest"`, while the click itself
+  always checks `allowed`, never `visible`.
+- **Every other role** (Technician, Reviewer, QA Manager, or anyone with
+  a tightened per-user override) keeps the pre-existing convention: a
+  control it has no permission for is hidden entirely, same as it's
+  always been in this app.
+
+Applied `permGate`/`sampleActionGate` across Inventory (all of it, listed
+above), Parameters, Test Types, Test Records (Edit/Archive/Delete/Add/
+bulk-upload), Archive Restore, Reports Generate, Sub-Batches, Sample
+edit/delete, Register/Import Sample, and — the biggest piece — **Results
+Workflow** (`22-results-workflow-ui.js`): Upload Results / Awaiting
+Review / Awaiting Approval / Approved-Release are now all visible tabs
+for Guest (`stageDefs[].show` includes `|| isGuestUser`), with a single
+`stageGate` computed once per tab in `ResultsWorkflowTab` and threaded
+down through `ReviewQueue`/`ApproveQueue`/`ReleaseQueue` →
+`StageQueueBody` → `FlatStageTable`/`BatchStageTable` → `StageRow` →
+`RowHoldReturnActions`, gating Mark Reviewed, Final Approve/Reject
+(single row and whole-batch signing), Release, Hold/Resume, Return to
+Analyst, and reviewer-remark editing.
+
+Also updated the **nav bar itself** (`99-app.js`): Guest now sees every
+tab a `Guest`-role-appropriate person would expect, including ones whose
+underlying action it can't perform (e.g. "Add Test Record", which needs
+`testRecords.create`) — the page itself blocks the actual mutation, per
+above. Users & Audit Log stay hidden from Guest specifically, since the
+default permission matrix already denies Guest *view* access to those
+two (a deliberate design choice, not a bug — see
+`DEFAULT_PERMISSION_MATRIX.Guest` in `41-rbac-ui.js`).
+
+Every hide-vs-block point also got a matching check inside the mutating
+function itself (not just the `onClick`), e.g. `createGroup`,
+`doDeleteSubBatch`, `handleSave`, `doBulkRelease`, `importChemicals` —
+so a handler can never fire past its permission check even if something
+somehow calls it directly instead of through the guarded button.
+
+**Known boundary, not addressed:** the `references` RBAC module
+(View/Create/Edit/Delete, defined in the Permission Matrix) has no
+standalone screen to gate — References are only ever created implicitly
+during Sample Registration, folded into that flow's own `samples`
+permission. Nothing to fix here; noted so it isn't mistaken for a missed
+spot later.
+
+
+## 2026-08-09 — Audit Log coverage extended to Inventory, Sub-Batches, Parameters
+
+The Audit Log viewer itself (`42-audit-log-ui.js` — search, filters, CSV
+export, `auditLog.view` gating) was already fully built; the gap was in
+*what gets written*. Before this round, `DataService.appendAudit()` was
+only called from Sample state changes (automatically, via the central
+`setSamples(updater, changedRecord)` wrapper in `99-app.js`), Test
+Records, Test Types, and Users/Permission Matrix edits — so deleting a
+chemical batch or a sub-batch left no trail at all, silently.
+
+- Added `DataService.appendAudit()` calls at every mutation point covered
+  by this round's `permGate()` audit above:
+  **Inventory** (`11-inventory-ui.js`) — chemical create/edit/delete,
+  batch add/edit/delete, glassware create/edit/delete/move (to Analysis
+  Room / to Store / Mark Broken), equipment create/edit/delete + event
+  log/edit/delete, gas create/edit/delete + cylinder add/edit/delete/
+  refill/mark-empty, and the three bulk-import actions (one summary
+  entry per import, e.g. "Imported 12 chemical batch row(s)…").
+  **Sub-Batches** (`21-sample-ui.js`) — create/edit (`createGroup`) and
+  delete (`doDeleteSubBatch`). **Parameters** (`12a-parameters-ui.js`) —
+  create/edit (`handleSave`) and delete (`handleDelete`).
+- Every new call uses the same field shape already established
+  elsewhere: `{ entity, entityId, action, user: session.username,
+  role: session.role, note }` — no new conventions.
+- `AUDIT_ENTITY_OPTIONS` (`42-audit-log-ui.js`) extended with `chemical`,
+  `glassware`, `equipment`, `gas`, `subBatch`, and `parameter` so the new
+  entries are filterable, not just visible in an unfiltered dump. Updated
+  the file's own header comment (it previously documented this exact gap
+  as known-and-open) to reflect the closed state and list every
+  write-site for future reference.

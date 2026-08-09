@@ -50,6 +50,11 @@ function LoginPage({
     e.preventDefault();
     setChecking(true);
     const candidate = users.find(u => u.username.toLowerCase() === username.trim().toLowerCase());
+    if (candidate && candidate.active === false) {
+      setChecking(false);
+      setError("This account has been deactivated. Contact your Administrator.");
+      return;
+    }
     const ok = candidate ? await verifyPassword(candidate, password) : false;
     setChecking(false);
     if (!ok) {

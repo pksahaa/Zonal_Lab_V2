@@ -25,7 +25,9 @@
 // how the result got entered.
 //
 // ROLE AWARENESS — a stage/queue is only rendered at all if the signed-in
-// role is permissioned for it (permissionsFor() in 20-sample-model.js):
+// user is permissioned for it (permissionsFor(permissionMatrix, session) in
+// 20-sample-model.js — role default from the "samples" module of the shared
+// permission matrix, per-user override wins if set):
 //   - Technician (the "Analyzer" role) → canEnterResults only → sees ONLY
 //     "Pending Upload". Nothing else from this tab is even reachable.
 //   - Reviewer → canReview only → sees ONLY "Awaiting Review".
@@ -188,9 +190,10 @@ function StageViewToggle({ viewMode, setViewMode }) {
 //     whatever bulk action moves the rest of that batch/group forward.
 //   Resume — clears the hold with no status change.
 // ----
-function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size }) {
+function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size, stageGate }) {
   const held = isTestOnHold(sample, testTypeId);
   function doReturn() {
+    if (!stageGate.allowed) return;
     const nextRecords = voidSampleResultForTest(testRecords, sample, testTypeId);
     if (nextRecords !== testRecords) setTestRecords?.(nextRecords);
     const updated = returnRequestedTestToAnalyst(sample, testTypeId, testTypeName, session);
@@ -198,20 +201,23 @@ function RowHoldReturnActions({ sample, testTypeId, testTypeName, session, notif
     notify?.(`${sample.sampleCode} returned to analyst for ${testTypeName} — back in the pending-testing queue, same as a freshly registered sample.`, "warn");
   }
   function doHold() {
+    if (!stageGate.allowed) return;
     const updated = holdRequestedTestForSample(sample, testTypeId, testTypeName, session);
     setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} put on hold for ${testTypeName} — parked in Awaiting Review, other samples in this batch are unaffected.`, "warn");
   }
   function doResume() {
+    if (!stageGate.allowed) return;
     const updated = resumeRequestedTestForSample(sample, testTypeId, testTypeName, session);
     setSamples(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
     notify?.(`${sample.sampleCode} resumed for ${testTypeName} — back in the normal queue.`, "ok");
   }
+  if (!stageGate.visible) return E(React.Fragment, null);
   return E("div", { className: "flex items-center gap-1" },
     held
-      ? E(IconButton, { key: "resume", name: "check", color: C.ok, title: "Resume — back into the normal queue", onClick: doResume })
-      : E(IconButton, { key: "hold", name: "lock", color: C.warn, title: "On Hold — park in Awaiting Review", onClick: doHold }),
-    E(IconButton, { key: "return", name: "arrowLeft", color: C.danger, title: "Return to Analyst — back to pending testing, like a fresh sample", onClick: doReturn })
+      ? E(IconButton, { key: "resume", name: "check", color: C.ok, title: "Resume — back into the normal queue", onClick: stageGate.guard(doResume) })
+      : E(IconButton, { key: "hold", name: "lock", color: C.warn, title: "On Hold — park in Awaiting Review", onClick: stageGate.guard(doHold) }),
+    E(IconButton, { key: "return", name: "arrowLeft", color: C.danger, title: "Return to Analyst — back to pending testing, like a fresh sample", onClick: stageGate.guard(doReturn) })
   );
 }
 
@@ -253,7 +259,7 @@ function RemarkEditRow({ manualRemark, onSave, onClose, colSpan }) {
 // bulkMarkReviewed / bulkDecideParameter / bulkReleaseParameter functions
 // bulk actions use, just called with a one-sample list, so per-row and
 // bulk/batch behavior can never drift apart. ----
-function StageRow({ row, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey }) {
+function StageRow({ row, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey, stageGate }) {
   const { sample, testTypeId, testTypeName } = row;
   const held = isTestOnHold(sample, testTypeId);
   const resultInfo = getSampleResultForTest(sample, testTypeId, testRecords);
@@ -263,15 +269,21 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
   const isSigningThisRow = signingKey === rowKey;
   const isEditingRemarkThisRow = remarkEditKey === rowKey;
   const currentManualRemark = getManualRemark(sample, testTypeId);
-  const canEditRemark = showSystemRemark && !!setSamples;
+  const canEditRemark = showSystemRemark && !!setSamples && stageGate.visible;
   function handleManualRemarkChange(text) {
+    if (!stageGate.allowed) {
+      notify?.("Guest access can't edit reviewer remarks — this login is view-only for this action.", "warn");
+      return;
+    }
     const updated = setManualRemarkOnSample(sample, testTypeId, text);
     setSamples?.(prev => prev.map(s => s.id === sample.id ? updated : s), updated);
   }
   function doMarkReviewed() {
+    if (!stageGate.allowed) return;
     bulkMarkReviewed([sample], testTypeId, testTypeName, session, setSamples, notify);
   }
   function doRelease() {
+    if (!stageGate.allowed) return;
     const result = bulkReleaseParameter([sample], testTypeId, testTypeName, session);
     result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
     if (result.updated.length) notify?.(`${sample.sampleCode} released for ${testTypeName}.`, "ok");
@@ -301,16 +313,16 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
   ));
   cells.push(E("td", { key: "actions", className: "px-2 py-1.5" },
     E("div", { className: "flex items-center gap-1 whitespace-nowrap" },
-      !held && stage === "review" && E(IconButton, { name: "check", color: C.teal, title: "Mark Reviewed", onClick: doMarkReviewed }),
-      !held && stage === "approve" && E(IconButton, { name: "check", color: C.teal, title: "Final Approve / Reject", onClick: () => setSigningKey(isSigningThisRow ? null : rowKey) }),
-      !held && stage === "release" && E(IconButton, { name: "printer", color: C.teal, title: "Release", onClick: doRelease }),
+      !held && stage === "review" && stageGate.visible && E(IconButton, { name: "check", color: C.teal, title: "Mark Reviewed", onClick: stageGate.guard(doMarkReviewed) }),
+      !held && stage === "approve" && stageGate.visible && E(IconButton, { name: "check", color: C.teal, title: "Final Approve / Reject", onClick: stageGate.guard(() => setSigningKey(isSigningThisRow ? null : rowKey)) }),
+      !held && stage === "release" && stageGate.visible && E(IconButton, { name: "printer", color: C.teal, title: "Release", onClick: stageGate.guard(doRelease) }),
       canEditRemark && E(IconButton, {
         name: "edit",
         color: currentManualRemark ? C.teal : C.muted,
         title: currentManualRemark ? "Edit reviewer remark" : "Add reviewer remark",
-        onClick: () => setRemarkEditKey(isEditingRemarkThisRow ? null : rowKey)
+        onClick: stageGate.guard(() => setRemarkEditKey(isEditingRemarkThisRow ? null : rowKey))
       }),
-      E(RowHoldReturnActions, { sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size: "sm" })
+      E(RowHoldReturnActions, { sample, testTypeId, testTypeName, session, notify, setSamples, setTestRecords, testRecords, size: "sm", stageGate })
     )
   ));
   return E(React.Fragment, { key: rowKey },
@@ -327,6 +339,11 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
         user: session,
         label: `Final Approval — ${testTypeName} (${sample.sampleCode})`,
         onConfirm: payload => {
+          if (!stageGate.allowed) {
+            notify?.("Guest access can't approve results — this login is view-only for this action.", "warn");
+            setSigningKey(null);
+            return;
+          }
           try {
             const result = bulkDecideParameter([sample], testTypeId, testTypeName, payload, session);
             result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
@@ -348,7 +365,7 @@ function StageRow({ row, stage, testRecords, testTypes, parameters, references, 
 
 // ---- Flat View: every row from every group, in one table, Test Type
 // column included since there's no grouping header to imply it. ----
-function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
+function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, stageGate }) {
   const [signingKey, setSigningKey] = React.useState(null);
   const [remarkEditKey, setRemarkEditKey] = React.useState(null);
   const headers = ["Sample", "Client", "Reference", "Test Type", "Result", ...(showSystemRemark ? ["System Remark"] : []), "Actions"];
@@ -362,7 +379,7 @@ function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, refer
       ))),
       E("tbody", null, rows.map(row => E(StageRow, {
         key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
-        setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: true, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey
+        setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: true, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey, stageGate
       })))
     )
   );
@@ -372,12 +389,27 @@ function FlatStageTable({ rows, stage, testRecords, testTypes, parameters, refer
 // "Individual / No Batch") they came from, each section with its own
 // batch-scoped bulk action (applies to every non-held row in that section
 // only) alongside the same per-row actions Flat View has. ----
-function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark }) {
+function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, stageGate }) {
   const [signingKey, setSigningKey] = React.useState(null);
   const [remarkEditKey, setRemarkEditKey] = React.useState(null);
-  const [collapsedBuckets, setCollapsedBuckets] = React.useState({});
+  // Default: all buckets start collapsed so the reviewer sees a summary first
+  const [collapsedBuckets, setCollapsedBuckets] = React.useState(() => {
+    const init = {};
+    // We'll populate on first render via useMemo below
+    return init;
+  });
+  const [bucketsInitialized, setBucketsInitialized] = React.useState(false);
   const MIN_VISIBLE_WHEN_COLLAPSED = 3;
   const buckets = React.useMemo(() => groupRowsByBatch(rows, testRecords, subBatches), [rows, testRecords, subBatches]);
+  // Collapse all buckets on first load
+  React.useEffect(() => {
+    if (!bucketsInitialized && buckets.length > 0) {
+      const init = {};
+      buckets.forEach(b => { if (b.rows.length > MIN_VISIBLE_WHEN_COLLAPSED) init[b.key] = true; });
+      setCollapsedBuckets(init);
+      setBucketsInitialized(true);
+    }
+  }, [buckets, bucketsInitialized]);
   return E("div", null,
     !buckets.length && E("div", { className: "text-xs p-3", style: { color: C.muted } }, "Nothing here right now."),
     buckets.map(bucket => {
@@ -386,15 +418,19 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
       const colWidths = ["14%", "16%", "16%", "17%", ...(showSystemRemark ? ["22%"] : []), "15%"];
       const isCollapsible = bucket.rows.length > MIN_VISIBLE_WHEN_COLLAPSED;
       const isCollapsed = isCollapsible && !!collapsedBuckets[bucket.key];
-      const visibleRows = isCollapsed ? bucket.rows.slice(0, MIN_VISIBLE_WHEN_COLLAPSED) : bucket.rows;
-      const hiddenCount = bucket.rows.length - visibleRows.length;
+      // In collapsed mode all rows are shown inside a fixed-height scroll container;
+      // in expanded mode the full table renders without any height cap.
+      const visibleRows = bucket.rows;
+      const hiddenCount = 0; // no rows hidden — scroll handles overflow
       function toggleCollapse() {
         setCollapsedBuckets(prev => ({ ...prev, [bucket.key]: !prev[bucket.key] }));
       }
       function doBulkMarkReviewed() {
+        if (!stageGate.allowed) return;
         bulkMarkReviewed(activeSamples, bucket.testTypeId, bucket.testTypeName, session, setSamples, notify);
       }
       function doBulkRelease() {
+        if (!stageGate.allowed) return;
         const result = bulkReleaseParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, session);
         result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
         notify?.(`${result.updated.length} sample(s) released for ${bucket.testTypeName}.`, "ok");
@@ -419,30 +455,41 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
           `${bucket.rows.length} sample(s)${activeSamples.length !== bucket.rows.length ? ` · ${bucket.rows.length - activeSamples.length} on hold` : ""}`
         ),
         E("div", null,
-          E("table", { className: "w-full text-left table-fixed" },
+          E("div", {
+            style: {
+              maxHeight: isCollapsed ? "260px" : "none",
+              overflowY: isCollapsed ? "auto" : "visible",
+              borderLeft: isCollapsed ? `3px solid ${C.teal}` : "none",
+              paddingLeft: isCollapsed ? "6px" : 0,
+              transition: "max-height 0.2s ease"
+            }
+          },
+            E("table", { className: "w-full text-left table-fixed" },
             E("colgroup", null, colWidths.map((w, i) => E("col", { key: i, style: { width: w } }))),
             E("thead", null, E("tr", null, headers.map(h =>
               E("th", { key: h, className: "px-2 py-1.5 text-[11px] font-semibold", style: { color: C.muted } }, h)
             ))),
             E("tbody", null, visibleRows.map(row => E(StageRow, {
               key: `${row.sample.id}__${row.testTypeId}`, row, stage, testRecords, testTypes, parameters, references, session, notify,
-              setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: false, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey
+              setSamples, setTestRecords, goToSample, showSystemRemark, showTestTypeColumn: false, signingKey, setSigningKey, remarkEditKey, setRemarkEditKey, stageGate
             })))
           )
-        ),
-        isCollapsed && hiddenCount > 0 && E("div", { className: "text-[11px] text-center py-1.5" },
-          E("span", { style: { color: C.muted } }, `+${hiddenCount} more sample(s) hidden — `),
-          E("button", { type: "button", className: "underline font-medium", style: { color: C.teal }, onClick: toggleCollapse }, "show all")
+          ) // close scrollable wrapper div
         ),
         activeSamples.length > 0 && E("div", { className: "flex flex-wrap gap-2 mt-2" },
-          stage === "review" && E(Button, { size: "sm", onClick: doBulkMarkReviewed }, E(Icon, { name: "check", size: 12 }), `Mark Reviewed — whole batch (${activeSamples.length})`),
-          stage === "approve" && E(Button, { size: "sm", onClick: () => setSigningKey(isBucketSigning ? null : bucketSigningKey) }, E(Icon, { name: "check", size: 12 }), `Final Approve / Reject — whole batch (${activeSamples.length})`),
-          stage === "release" && E(Button, { size: "sm", onClick: doBulkRelease }, E(Icon, { name: "printer", size: 12 }), `Release — whole batch (${activeSamples.length})`)
+          stage === "review" && stageGate.visible && E(Button, { size: "sm", onClick: stageGate.guard(doBulkMarkReviewed) }, E(Icon, { name: "check", size: 12 }), `Mark Reviewed — whole batch (${activeSamples.length})`),
+          stage === "approve" && stageGate.visible && E(Button, { size: "sm", onClick: stageGate.guard(() => setSigningKey(isBucketSigning ? null : bucketSigningKey)) }, E(Icon, { name: "check", size: 12 }), `Final Approve / Reject — whole batch (${activeSamples.length})`),
+          stage === "release" && stageGate.visible && E(Button, { size: "sm", onClick: stageGate.guard(doBulkRelease) }, E(Icon, { name: "printer", size: 12 }), `Release — whole batch (${activeSamples.length})`)
         ),
         isBucketSigning && E(SignatureCapture, {
           user: session,
           label: `Final Approval — ${bucket.label} · ${bucket.testTypeName} (${activeSamples.length} sample(s))`,
           onConfirm: payload => {
+            if (!stageGate.allowed) {
+              notify?.("Guest access can't approve results — this login is view-only for this action.", "warn");
+              setSigningKey(null);
+              return;
+            }
             try {
               const result = bulkDecideParameter(activeSamples, bucket.testTypeId, bucket.testTypeName, payload, session);
               result.updated.forEach(u => setSamples(prev => prev.map(s => s.id === u.id ? u : s), u));
@@ -464,15 +511,15 @@ function BatchStageTable({ rows, stage, testRecords, subBatches, testTypes, para
 // ---- one queue's body: header + view toggle + Flat/Batch table. Shared by
 // Review / Approve / Release so the toggle behaves identically in all
 // three. ----
-function StageQueueBody({ stage, groups, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, emptyText }) {
+function StageQueueBody({ stage, groups, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, emptyText, stageGate }) {
   const [viewMode, setViewMode] = React.useState("flat");
   const rows = React.useMemo(() => flattenStageGroups(groups), [groups]);
   if (!rows.length) return E("div", { className: "text-xs p-3", style: { color: C.muted } }, emptyText);
   return E("div", null,
     E("div", { className: "flex justify-end" }, E(StageViewToggle, { viewMode, setViewMode })),
     viewMode === "flat"
-      ? E(FlatStageTable, { rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })
-      : E(BatchStageTable, { rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark })
+      ? E(FlatStageTable, { rows, stage, testRecords, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, stageGate })
+      : E(BatchStageTable, { rows, stage, testRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, setTestRecords, goToSample, showSystemRemark, stageGate })
   );
 }
 
@@ -538,7 +585,7 @@ function PendingUploadQueue({ subBatches, samples, testRecords, testTypes, refer
   );
 }
 
-function ReviewQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
+function ReviewQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "results_entered"), [samples]);
   const qcWarnings = groups.map(g => {
     const qc = getQcStatusForMethod(g.testTypeId, testTypes, testRecords);
@@ -553,26 +600,26 @@ function ReviewQueue({ samples, setSamples, testRecords, setTestRecords, subBatc
       style: { background: C.warnBg, color: C.warn }
     }, E(Icon, { name: "warning", size: 12 }), w)),
     E(StageQueueBody, {
-      stage: "review", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+      stage: "review", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample, stageGate,
       showSystemRemark: true,
       emptyText: "No parameters awaiting review right now."
     })
   );
 }
 
-function ApproveQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
+function ApproveQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "under_review"), [samples]);
   return E(StageQueueBody, {
-    stage: "approve", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+    stage: "approve", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample, stageGate,
     showSystemRemark: true,
     emptyText: "No parameters awaiting final approval right now."
   });
 }
 
-function ReleaseQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }) {
+function ReleaseQueue({ samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate }) {
   const groups = React.useMemo(() => groupSamplesByParamStage(samples, "approved"), [samples]);
   return E(StageQueueBody, {
-    stage: "release", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample,
+    stage: "release", groups, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, setSamples, goToSample, stageGate,
     showSystemRemark: false,
     emptyText: "Nothing approved and awaiting release right now."
   });
@@ -590,16 +637,21 @@ function ResultsWorkflowTab({
   setTestRecords,
   parameters,
   session,
+  permissionMatrix,
   notify,
   goToTestEntry,
   goToSample
 }) {
-  const perms = permissionsFor(session.role);
+  const perms = permissionsFor(permissionMatrix, session);
+  const isGuestUser = session?.role === "Guest";
+  const reviewGate = sampleActionGate(perms, "canReview", session, notify, "review results");
+  const approveGate = sampleActionGate(perms, "canApprove", session, notify, "approve results");
+  const releaseGate = sampleActionGate(perms, "canRelease", session, notify, "release results");
   const stageDefs = [
-    { k: "upload", label: "Upload Results", icon: "upload", show: !!perms.canEnterResults },
-    { k: "review", label: "Awaiting Review", icon: "search", show: !!perms.canReview },
-    { k: "approve", label: "Awaiting Approval", icon: "check", show: !!perms.canApprove },
-    { k: "release", label: "Approved — Release", icon: "printer", show: !!perms.canRelease }
+    { k: "upload", label: "Upload Results", icon: "upload", show: !!perms.canEnterResults || isGuestUser },
+    { k: "review", label: "Awaiting Review", icon: "search", show: !!perms.canReview || isGuestUser },
+    { k: "approve", label: "Awaiting Approval", icon: "check", show: !!perms.canApprove || isGuestUser },
+    { k: "release", label: "Approved — Release", icon: "printer", show: !!perms.canRelease || isGuestUser }
   ];
   const visible = stageDefs.filter(s => s.show);
   const [active, setActive] = React.useState(visible[0]?.k || null);
@@ -634,9 +686,9 @@ function ResultsWorkflowTab({
       }, E(Icon, { name: s.icon, size: 14 }), s.label)
     )),
     active === "upload" && E(PendingUploadQueue, { subBatches, samples, testRecords, testTypes, references, goToTestEntry }),
-    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
-    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
-    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample }),
+    active === "review" && E(ReviewQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate: reviewGate }),
+    active === "approve" && E(ApproveQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate: approveGate }),
+    active === "release" && E(ReleaseQueue, { samples, setSamples, testRecords, setTestRecords, subBatches, testTypes, parameters, references, session, notify, goToSample, stageGate: releaseGate }),
     E(ScrollTopBottomButtons)
   );
 }

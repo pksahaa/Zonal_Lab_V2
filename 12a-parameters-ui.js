@@ -216,8 +216,15 @@ function ParametersTab({
   parameters,
   setParameters,
   testTypes,
+  session,
+  permissionMatrix,
   notify
 }) {
+  // Parameters live inside Test Configuration, so they share the "testTypes"
+  // module's permissions rather than having their own RBAC bucket.
+  const ttCreateGate = permGate(permissionMatrix, session, "testTypes", "create", notify, "add parameters");
+  const ttEditGate = permGate(permissionMatrix, session, "testTypes", "edit", notify, "edit parameters");
+  const ttDeleteGate = permGate(permissionMatrix, session, "testTypes", "delete", notify, "delete parameters");
   const [view, setView] = useState("list"); // "list" | "form"
   const [editingParam, setEditingParam] = useState(null);
   const [deleteFor, setDeleteFor] = useState(null);
@@ -230,10 +237,12 @@ function ParametersTab({
     return (testTypes || []).some(t => (t.linkedParameterIds || []).includes(id));
   }
   function openAdd() {
+    if (!ttCreateGate.allowed) return;
     setEditingParam(null);
     setView("form");
   }
   function openEdit(p) {
+    if (!ttEditGate.allowed) return;
     setEditingParam(p);
     setView("form");
   }
@@ -242,17 +251,35 @@ function ParametersTab({
     setView("list");
   }
   function handleSave(param) {
+    if (editingParam ? !ttEditGate.allowed : !ttCreateGate.allowed) return;
     if (editingParam) {
       setParameters(prev => prev.map(p => p.id === param.id ? param : p));
+      DataService.appendAudit({
+        entity: "parameter",
+        entityId: param.id,
+        action: "edit",
+        user: session.username,
+        role: session.role,
+        note: `Updated parameter "${param.name}"`
+      });
       notify(`Parameter "${param.name}" updated`);
     } else {
       setParameters(prev => [...prev, param]);
+      DataService.appendAudit({
+        entity: "parameter",
+        entityId: param.id,
+        action: "create",
+        user: session.username,
+        role: session.role,
+        note: `Created parameter "${param.name}"`
+      });
       notify(`Parameter "${param.name}" created`);
     }
     setView("list");
     setEditingParam(null);
   }
   function handleDelete(p) {
+    if (!ttDeleteGate.allowed) return;
     if (isParameterUsed(p.id)) {
       notify("This parameter is linked to one or more Test Types — unlink it first.", "warn");
       setDeleteFor(null);
@@ -260,6 +287,14 @@ function ParametersTab({
     }
     setParameters(prev => prev.filter(x => x.id !== p.id));
     setDeleteFor(null);
+    DataService.appendAudit({
+      entity: "parameter",
+      entityId: p.id,
+      action: "delete",
+      user: session.username,
+      role: session.role,
+      note: `Deleted parameter "${p.name}"`
+    });
     notify(`Deleted parameter "${p.name}"`);
   }
 
@@ -316,18 +351,18 @@ function ParametersTab({
         }, /*#__PURE__*/React.createElement("option", { value: "" }, "All categories"),
            PARAMETER_CATEGORIES.map(cat => /*#__PURE__*/React.createElement("option", { key: cat, value: cat }, cat)))
       ),
-      /*#__PURE__*/React.createElement(Button, {
+      ttCreateGate.visible && /*#__PURE__*/React.createElement(Button, {
         size: "sm",
-        onClick: openAdd
+        onClick: ttCreateGate.guard(openAdd)
       }, /*#__PURE__*/React.createElement(Icon, { name: "plus", size: 14 }), "+ Add Parameter")
     ),
     filtered.length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
       icon: "beaker",
       title: parameters.length === 0 ? "No parameters yet" : "No parameters match your search",
       subtitle: parameters.length === 0 ? "Add your first analytical parameter — code, name, unit, and optional limits." : "Try a different code, name, or category.",
-      action: parameters.length === 0 ? /*#__PURE__*/React.createElement(Button, {
+      action: (parameters.length === 0 && ttCreateGate.visible) ? /*#__PURE__*/React.createElement(Button, {
         size: "sm",
-        onClick: openAdd
+        onClick: ttCreateGate.guard(openAdd)
       }, /*#__PURE__*/React.createElement(Icon, { name: "plus", size: 13 }), "+ Add Parameter") : undefined
     }),
     filtered.length > 0 && /*#__PURE__*/React.createElement("div", {
@@ -359,8 +394,8 @@ function ParametersTab({
           /*#__PURE__*/React.createElement("td", { className: "px-3 py-2.5 text-right" },
             /*#__PURE__*/React.createElement("div", { className: "flex items-center justify-end gap-1" },
               usedCount > 0 && /*#__PURE__*/React.createElement(Badge, { tone: "info", title: `Linked to ${usedCount} test type(s)` }, usedCount, " test type", usedCount === 1 ? "" : "s"),
-              /*#__PURE__*/React.createElement(IconButton, { name: "edit", color: C.teal, title: "Edit parameter", onClick: () => openEdit(p) }),
-              /*#__PURE__*/React.createElement(IconButton, { name: "trash", color: C.warn, title: "Delete parameter", onClick: () => setDeleteFor(p) })
+              ttEditGate.visible && /*#__PURE__*/React.createElement(IconButton, { name: "edit", color: C.teal, title: "Edit parameter", onClick: ttEditGate.guard(() => openEdit(p)) }),
+              ttDeleteGate.visible && /*#__PURE__*/React.createElement(IconButton, { name: "trash", color: C.warn, title: "Delete parameter", onClick: ttDeleteGate.guard(() => setDeleteFor(p)) })
             ))
           );
         }))

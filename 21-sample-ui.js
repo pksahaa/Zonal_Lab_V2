@@ -758,6 +758,7 @@ function SampleDetail({
   sample,
   users,
   session,
+  permissionMatrix,
   testTypes,
   testRecords,
   subBatches,
@@ -769,7 +770,7 @@ function SampleDetail({
   notify,
   goToResultsWorkflow
 }) {
-  const perms = permissionsFor(session.role);
+  const perms = permissionsFor(permissionMatrix, session);
   const allowedNext = nextAllowedStatuses(sample);
   // results_entered/under_review/approved/released are governed elsewhere
   // now (auto-rollup, Sub-Batch review, or the signature-gated approval
@@ -782,8 +783,17 @@ function SampleDetail({
   const [editForm, setEditForm] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [custodyAction, setCustodyAction] = React.useState(null); // target status string ("on_hold"|"rejected"|"cancelled") | null
-  const canEdit = perms.canRegister && sample.status !== "released";
-  const canDelete = perms.canRegister && (sample.linkedTestRecordIds || []).length === 0;
+  const isGuestUser = session?.role === "Guest";
+  const canEditAllowed = perms.canRegister && sample.status !== "released";
+  const canDeleteAllowed = perms.canRegister && (sample.linkedTestRecordIds || []).length === 0;
+  const canEdit = canEditAllowed || (isGuestUser && sample.status !== "released");
+  const canDelete = canDeleteAllowed || (isGuestUser && (sample.linkedTestRecordIds || []).length === 0);
+  function guardSampleAction(allowed, handler) {
+    return () => {
+      if (allowed) return handler();
+      notify?.("Guest access can't edit or delete samples — this login is view-only for this action.", "warn");
+    };
+  }
   function startEdit() {
     setEditForm({
       clientName: sample.clientName,
@@ -1016,12 +1026,12 @@ function SampleDetail({
     name: "edit",
     color: C.teal,
     title: "Correct registration details",
-    onClick: startEdit
+    onClick: guardSampleAction(canEditAllowed, startEdit)
   }), canDelete && /*#__PURE__*/React.createElement(IconButton, {
     name: "trash",
     color: C.warn,
     title: "Delete this sample (no test records linked yet)",
-    onClick: () => setConfirmDelete(true)
+    onClick: guardSampleAction(canDeleteAllowed, () => setConfirmDelete(true))
   }))), deleteConfirmPanel, editPanel, qcWarnings.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "mb-3 p-3 rounded text-xs",
     style: {
@@ -1990,6 +2000,7 @@ function SamplesTab({
   equipment,
   users,
   session,
+  permissionMatrix,
   notify,
   focusSampleId,
   setFocusSampleId,
@@ -2044,7 +2055,18 @@ function SamplesTab({
   const [recentlyAddedIds, setRecentlyAddedIds] = React.useState(new Set());
   const [openMenuId, setOpenMenuId] = React.useState(null);
   const [custodyAction, setCustodyAction] = React.useState(null); // { sample, action } | null
-  const perms = permissionsFor(session.role);
+  const perms = permissionsFor(permissionMatrix, session);
+  const isGuestUser = session?.role === "Guest";
+  const registerGate = {
+    allowed: perms.canRegister,
+    visible: perms.canRegister || isGuestUser,
+    guard(handler) {
+      return (...args) => {
+        if (perms.canRegister) return handler(...args);
+        notify?.("Guest access can't register or import samples — this login is view-only for this action.", "warn");
+      };
+    }
+  };
   const openSample = samples.find(s => s.id === openId) || null;
   const filtered = samples.filter(s => {
     if (statusFilter && s.status !== statusFilter) return false;
@@ -2130,6 +2152,10 @@ function SamplesTab({
   // happens via a checkbox window (same UX as Register Sample/Batch) instead
   // of a typed "RequestedTests" column.
   function importSamples(file) {
+    if (!registerGate.allowed) {
+      notify?.("Guest access can't import samples — this login is view-only for this action.", "warn");
+      return;
+    }
     readWorkbook(file, (err, rows) => {
       if (err) return notify("Could not read Excel file", "warn");
       const usableRows = rows.filter(row => {
@@ -2490,16 +2516,16 @@ function SamplesTab({
     style: {
       color: C.muted
     }
-  }, "Registration, chain of custody, assignment, approval and result release.")), perms.canRegister && /*#__PURE__*/React.createElement("div", {
+  }, "Registration, chain of custody, assignment, approval and result release.")), registerGate.visible && /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2 flex-wrap"
   }, /*#__PURE__*/React.createElement(Button, {
-    onClick: () => setShowBatchForm(true)
+    onClick: registerGate.guard(() => setShowBatchForm(true))
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "clipboard",
     size: 13
   }), "Register Sample(s)"))), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end gap-2 mb-3 flex-wrap"
-  }, perms.canRegister && /*#__PURE__*/React.createElement("input", {
+  }, registerGate.visible && /*#__PURE__*/React.createElement("input", {
     ref: bulkUploadInputRef,
     type: "file",
     accept: ".xlsx,.xls,.csv",
@@ -2508,10 +2534,10 @@ function SamplesTab({
       if (e.target.files[0]) importSamples(e.target.files[0]);
       e.target.value = "";
     }
-  }), perms.canRegister && /*#__PURE__*/React.createElement(Button, {
+  }), registerGate.visible && /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
     size: "sm",
-    onClick: () => bulkUploadInputRef.current && bulkUploadInputRef.current.click()
+    onClick: registerGate.guard(() => bulkUploadInputRef.current && bulkUploadInputRef.current.click())
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "upload",
     size: 14
@@ -2709,6 +2735,7 @@ function SamplesTab({
     references: references,
     users: users,
     session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify
   }), sampleSubTab === "resultsWorkflow" && /*#__PURE__*/React.createElement(ResultsWorkflowTab, {
     samples: samples,
@@ -2721,6 +2748,7 @@ function SamplesTab({
     setTestRecords: setTestRecords,
     parameters: parameters,
     session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify,
     goToTestEntry: goToTestEntry,
     goToSample: id => setOpenId(id)
@@ -2748,6 +2776,7 @@ function SamplesTab({
     sample: openSample,
     users: users,
     session: session,
+    permissionMatrix: permissionMatrix,
     testTypes: testTypes,
     testRecords: testRecords,
     subBatches: subBatches,
@@ -2808,8 +2837,15 @@ function SubBatchBuilder({
   references,
   users,
   session,
+  permissionMatrix,
   notify
 }) {
+  const subBatchCreateGate = permGate(permissionMatrix, session, "subBatches", "create", notify, "create sub-batches");
+  const subBatchEditGate = permGate(permissionMatrix, session, "subBatches", "edit", notify, "edit sub-batches");
+  const subBatchDeleteGate = permGate(permissionMatrix, session, "subBatches", "delete", notify, "delete sub-batches");
+  const canCreateSubBatch = subBatchCreateGate.visible;
+  const canEditSubBatch = subBatchEditGate.visible;
+  const canDeleteSubBatch = subBatchDeleteGate.visible;
   const [selectedTestId, setSelectedTestId] = React.useState("");
   const [selectedReferenceIds, setSelectedReferenceIds] = React.useState([]);
   const [selectedSampleIds, setSelectedSampleIds] = React.useState([]);
@@ -2916,6 +2952,10 @@ function SubBatchBuilder({
     setEditingSubBatchId(null);
   }
   function startEdit(sb) {
+    if (!subBatchEditGate.allowed) {
+      notify?.("Guest access can't edit sub-batches — this login is view-only for this action.", "warn");
+      return;
+    }
     setSelectedTestId(sb.testTypeId);
     setSelectedReferenceIds([]);
     setSelectedSampleIds(sb.memberSampleIds || []);
@@ -2937,6 +2977,11 @@ function SubBatchBuilder({
   function createGroup() {
     if (creatingRef.current) return;
     creatingRef.current = true;
+    if (editingSubBatchId ? !subBatchEditGate.allowed : !subBatchCreateGate.allowed) {
+      notify?.("You don't have permission to do that.", "warn");
+      creatingRef.current = false;
+      return;
+    }
     if (!selectedTestId || selectedSampleIds.length === 0) {
       notify?.("Pick a test type and at least one sample.", "warn");
       creatingRef.current = false;
@@ -2953,6 +2998,14 @@ function SubBatchBuilder({
         assignedTester
       } : sb));
       markMembersInProgress(selectedSampleIds, selectedTestId);
+      DataService.appendAudit({
+        entity: "subBatch",
+        entityId: editingSubBatchId,
+        action: "edit",
+        user: session.username,
+        role: session.role,
+        note: `Updated sub-batch "${label.trim() || "Sub-batch"}" — now ${selectedSampleIds.length} sample(s)`
+      });
       notify?.(`${label.trim() || "Sub-batch"} updated — now ${selectedSampleIds.length} sample(s).`, "ok");
     } else {
       const sb = createSubBatch({
@@ -2964,21 +3017,42 @@ function SubBatchBuilder({
       }, subBatches);
       setSubBatches(prev => [sb, ...prev]);
       markMembersInProgress(selectedSampleIds, selectedTestId);
+      DataService.appendAudit({
+        entity: "subBatch",
+        entityId: sb.id,
+        action: "create",
+        user: session.username,
+        role: session.role,
+        note: `Created sub-batch "${sb.label}" with ${selectedSampleIds.length} sample(s)`
+      });
       notify?.(`${sb.label} created with ${selectedSampleIds.length} sample(s).`, "ok");
     }
     resetForm();
     creatingRef.current = false;
   }
   function updateAssignedTester(sbId, tester) {
+    if (!subBatchEditGate.allowed) {
+      notify?.("Guest access can't edit sub-batches — this login is view-only for this action.", "warn");
+      return;
+    }
     setSubBatches(prev => prev.map(sb => sb.id === sbId ? {
       ...sb,
       assignedTester: tester
     } : sb));
   }
   function doDeleteSubBatch(sb) {
+    if (!subBatchDeleteGate.allowed) return;
     setSubBatches(prev => prev.filter(x => x.id !== sb.id));
     setDeleteSubBatchId(null);
     if (editingSubBatchId === sb.id) resetForm();
+    DataService.appendAudit({
+      entity: "subBatch",
+      entityId: sb.id,
+      action: "delete",
+      user: session.username,
+      role: session.role,
+      note: `Deleted sub-batch "${sb.label}"`
+    });
     notify?.(`${sb.label} deleted.`, "ok");
   }
   // ---- Review (Phase 3) — approving/returning a Sub-Batch only ever
@@ -3189,12 +3263,13 @@ function SubBatchBuilder({
     }
   }, "Heads up: this sub-batch mixes samples from ", distinctReferences.length, " different References (", distinctReferences.map(r => r.refNo).join(", "), "). That's fine for testing — each sample keeps its own Reference for reporting.") : null;
 
+  const canSubmitSubBatchForm = editingSubBatchId ? canEditSubBatch : canCreateSubBatch;
   const actionRow = /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end gap-2 mt-3"
   }, editingSubBatchId && /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
     onClick: resetForm
-  }, "Cancel Edit"), /*#__PURE__*/React.createElement(Button, {
+  }, "Cancel Edit"), canSubmitSubBatchForm && /*#__PURE__*/React.createElement(Button, {
     onClick: createGroup
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
@@ -3238,12 +3313,12 @@ function SubBatchBuilder({
       size: 15
     })
   }, pickerBlock);
-  const creationSection = /*#__PURE__*/React.createElement("div", {
+  const creationSection = (canCreateSubBatch || canEditSubBatch) ? /*#__PURE__*/React.createElement("div", {
     className: "grid gap-4",
     style: {
       gridTemplateColumns: "minmax(240px, 1fr) minmax(320px, 1.6fr)"
     }
-  }, formCard, pickerCard);
+  }, formCard, pickerCard) : null;
 
   // ---- Consolidated "All Analytical Batches" data table ----
   // Each sub-batch is a real <tr> now (Analytical Batch / Samples / Tester /
@@ -3255,7 +3330,7 @@ function SubBatchBuilder({
   // note, signature capture) renders as a second, full-width <tr> directly
   // beneath it rather than breaking table alignment.
   function renderSubBatchRow(sb) {
-    const testerControl = sb.status === "pending" ? /*#__PURE__*/React.createElement("select", {
+    const testerControl = sb.status === "pending" && canEditSubBatch ? /*#__PURE__*/React.createElement("select", {
       className: "border rounded px-2 py-1 text-xs w-full",
       style: {
         borderColor: C.border
@@ -3308,18 +3383,18 @@ function SubBatchBuilder({
       style: {
         color: C.muted
       }
-    }, "Review/Approve/Release → Results Workflow"), /*#__PURE__*/React.createElement(IconButton, {
+    }, "Review/Approve/Release → Results Workflow"), canEditSubBatch && /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
       color: C.teal,
       title: sb.status === "pending" ? "Edit sub-batch" : "Only pending sub-batches can be edited (this one is already tested)",
       disabled: sb.status !== "pending",
-      onClick: () => startEdit(sb)
-    }), /*#__PURE__*/React.createElement(IconButton, {
+      onClick: subBatchEditGate.guard(() => startEdit(sb))
+    }), canDeleteSubBatch && /*#__PURE__*/React.createElement(IconButton, {
       name: "trash",
       color: C.warn,
       title: sb.status === "pending" ? "Delete sub-batch" : "Delete the linked test record first to remove a tested sub-batch",
       disabled: sb.status !== "pending",
-      onClick: () => setDeleteSubBatchId(sb.id)
+      onClick: subBatchDeleteGate.guard(() => setDeleteSubBatchId(sb.id))
     }))));
     const panelRow = !hasPanel ? null : /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
       colSpan: 5,

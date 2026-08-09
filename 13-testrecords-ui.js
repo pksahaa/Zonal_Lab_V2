@@ -1,3 +1,20 @@
+// ============================================================================
+// ARCHIVING — a "completed" record is one whose sample(s) have reached the
+// final "released" stage for this record's test type. Both record shapes are
+// covered: a Sub-Batch/Analytical Batch record (memberSampleIds) needs EVERY
+// member sample released; a legacy individual record (sampleId) just needs
+// that one sample released. If a referenced sample can no longer be found,
+// the record is treated as not-yet-archivable rather than guessing.
+// ============================================================================
+function isTestRecordArchivable(r, samples, testRecords, subBatches) {
+  const sampleIds = r.memberSampleIds && r.memberSampleIds.length ? r.memberSampleIds : r.sampleId ? [r.sampleId] : [];
+  if (!sampleIds.length) return false;
+  return sampleIds.every(sid => {
+    const sample = (samples || []).find(s => s.id === sid);
+    if (!sample) return false;
+    return testStageForSample(sample, r.testTypeId, testRecords, subBatches) === "released";
+  });
+}
 // ===== 13-testrecords-ui.js =====
 // ============================================================================
 // TEST EXECUTION & RECORDS — running a test against a Test Method (consumes
@@ -22,6 +39,7 @@ function AddTestTab({
   subBatches,
   setSubBatches,
   session,
+  permissionMatrix,
   notify,
   goToSample,
   editingRecord,
@@ -30,6 +48,8 @@ function AddTestTab({
   preselectSubBatchId,
   onPreselectHandled
 }) {
+  const trCreateGate = permGate(permissionMatrix, session, "testRecords", "create", notify, "add test records");
+  const trEditGateForSave = permGate(permissionMatrix, session, "testRecords", "edit", notify, "edit test records");
   const [selectedSubBatchId, setSelectedSubBatchId] = useState("");
   // Submit-guard for handleSave — see the try/finally wrapper below.
   const savingRef = React.useRef(false);
@@ -86,7 +106,8 @@ function AddTestTab({
   const [showResultUploadModal, setShowResultUploadModal] = useState(false);
   const [qcSampleType, setQcSampleType] = useState(""); // "" | qcType matching a rule on selectedTest
   const [qcMeasuredValue, setQcMeasuredValue] = useState("");
-  const [bracketingPoints, setBracketingPoints] = useState([]); // [{id,label,value}] — bracketing/interspersed QC only
+  const [bracketingPoints, setBracketingPoints] = useState([]); // [{id,label,value, comparator, limitLow, limitHigh, targetValue}]
+  const [numQcCheckpoints, setNumQcCheckpoints] = useState("3");
   const [submitAttempted, setSubmitAttempted] = useState(false);
   function toggleOptionalUsed(key) {
     setOptionalUsed(prev => ({
@@ -159,12 +180,15 @@ function AddTestTab({
   const matchedQcRule = qcSampleType ? qcRules.find(r => r.qcType === qcSampleType) : null;
   const qcEvaluation = matchedQcRule && qcMeasuredValue !== "" ? evaluateQcRule(matchedQcRule, qcMeasuredValue) : null;
   const isBracketing = matchedQcRule?.qcType === "bracketing";
-  const bracketingRunLength = selectedSubBatch ? subBatchMembers.length : Number(numberOfFieldSamples) || 0;
   function addBracketingPoint(label) {
     setBracketingPoints(prev => [...prev, {
       id: uid("bkt"),
-      label: label || `Checkpoint ${prev.length + 1}`,
-      value: ""
+      label: label || "",
+      value: "",
+      targetValue: "",
+      comparator: "",
+      limitLow: "",
+      limitHigh: ""
     }]);
   }
   function removeBracketingPoint(id) {
@@ -176,32 +200,83 @@ function AddTestTab({
       ...patch
     } : p));
   }
-  // Auto-lay-out checkpoints across the run: always brackets sample #1 and
-  // the last sample, plus one every `bracketingInterval` samples in between
-  // — the standard "bracketing/interspersed QC" pattern for a batch run.
-  function autoLayoutBracketingPoints() {
-    const interval = Number(matchedQcRule?.bracketingInterval) || 0;
-    const total = bracketingRunLength;
-    if (!total) {
-      notify?.("Pick an Analytical Batch (or enter No. of Field Samples) first so positions can be laid out.", "warn");
+  function generateQcCheckpoints() {
+    const num = Number(numQcCheckpoints);
+    if (!num || num < 1) {
+      notify?.("Please enter a valid number of QC samples.", "warn");
       return;
     }
-    const positions = new Set([1, total]);
-    if (interval > 0) {
-      for (let p = interval; p < total; p += interval) positions.add(p);
+    const newPoints = [];
+    for (let i = 0; i < num; i++) {
+      newPoints.push({
+        id: uid("bkt"),
+        label: "",
+        value: "",
+        targetValue: "",
+        comparator: "",
+        limitLow: "",
+        limitHigh: ""
+      });
     }
-    const sorted = Array.from(positions).sort((a, b) => a - b);
-    setBracketingPoints(sorted.map(pos => ({
-      id: uid("bkt"),
-      label: pos === 1 ? `Before Sample 1` : pos === total ? `After Sample ${total} (end of run)` : `After Sample ${pos}`,
-      value: ""
-    })));
+    setBracketingPoints(newPoints);
   }
   const bracketingFilled = bracketingPoints.filter(p => p.value !== "");
-  const bracketingEvaluated = bracketingFilled.map(p => ({
-    ...p,
-    ...evaluateQcRule(matchedQcRule || {}, p.value)
-  }));
+  // Resolve a checkpoint's acceptance Comparator/Limit(s) LIVE from the
+  // current QC design (matched by the standard's Label), rather than
+  // trusting whatever got cached on the point at selection time — that
+  // cache can go missing (an older saved record, a slot whose label was
+  // set before the design existed, etc.) and used to silently fall through
+  // to "not evaluable", which looks exactly like every checkpoint failing.
+  // Only if no design standard matches the label any more (e.g. renamed or
+  // deleted since the record was saved) do we fall back to what's cached on
+  // the point itself, so history isn't lost.
+  function resolveBracketingLevel(p) {
+    const fromDesign = (matchedQcRule?.bracketingConcentrations || []).find(c => c.label === p.label);
+    // A matched design row is "configured" the moment it exists — the design
+    // screen's own dropdown displays "between" as soon as comparator is
+    // unset (bc.comparator || "between"), so a legacy row that predates the
+    // comparator default looks fine there but was previously treated as
+    // unconfigured here. Mirror the same fallback so display and evaluation
+    // never disagree about what a checkpoint's rule actually is.
+    if (fromDesign) {
+      return {
+        comparator: fromDesign.comparator || "between",
+        limitLow: fromDesign.limitLow,
+        limitHigh: fromDesign.limitHigh
+      };
+    }
+    if (p.comparator) {
+      return {
+        comparator: p.comparator,
+        limitLow: p.limitLow,
+        limitHigh: p.limitHigh
+      };
+    }
+    return null;
+  }
+  const bracketingEvaluated = bracketingFilled.map(p => {
+    const level = resolveBracketingLevel(p);
+    if (!level) {
+      return {
+        ...p,
+        pass: null,
+        message: "Select a QC Standard for this checkpoint first — its Comparator/Limit(s) decide pass/fail."
+      };
+    }
+    const evalRule = {
+      comparator: level.comparator,
+      limitLow: level.limitLow,
+      limitHigh: level.limitHigh,
+      unit: matchedQcRule?.unit
+    };
+    return {
+      ...p,
+      comparator: level.comparator,
+      limitLow: level.limitLow,
+      limitHigh: level.limitHigh,
+      ...evaluateQcRule(evalRule, p.value)
+    };
+  });
   const bracketingOverallPass = bracketingEvaluated.length ? bracketingEvaluated.every(p => p.pass) : null;
   function setResultInput(paramId, key, val) {
     setResultInputs(prev => ({
@@ -273,6 +348,12 @@ function AddTestTab({
     };
   }
   function applyPreSaveResultUpload(updatedMembers) {
+    const uploadGate = editingRecord ? trEditGateForSave : trCreateGate;
+    if (!uploadGate.allowed) {
+      notify?.(`Guest access can't ${editingRecord ? "edit" : "add"} test records — this login is view-only for this action.`, "warn");
+      setShowResultUploadModal(false);
+      return;
+    }
     setResultOverridesBySample(prev => {
       const next = { ...prev };
       updatedMembers.forEach(m => {
@@ -473,7 +554,11 @@ function AddTestTab({
       setBracketingPoints(editingRecord.qcCheck?.qcType === "bracketing" ? (editingRecord.qcCheck.points || []).map(p => ({
         id: p.id || uid("bkt"),
         label: p.label,
-        value: p.value === null || p.value === undefined ? "" : String(p.value)
+        value: p.value === null || p.value === undefined ? "" : String(p.value),
+        targetValue: p.targetValue ?? "",
+        comparator: p.comparator || "",
+        limitLow: p.limitLow ?? "",
+        limitHigh: p.limitHigh ?? ""
       })) : []);
       if (editingRecord.sampleId && (editingRecord.results || []).some(r => r.value != null)) {
         setResultOverridesBySample({
@@ -904,6 +989,10 @@ function AddTestTab({
           id: p.id,
           label: p.label,
           value: Number(p.value),
+          targetValue: p.targetValue,
+          comparator: p.comparator,
+          limitLow: p.limitLow,
+          limitHigh: p.limitHigh,
           pass: p.pass,
           message: p.message
         })),
@@ -923,6 +1012,14 @@ function AddTestTab({
         ...r,
         ...recordPayload
       } : r));
+      DataService.appendAudit({
+        entity: "testRecord",
+        entityId: editingRecord.id,
+        action: "edit",
+        user: session?.username || tester || "System",
+        role: session?.role || "Technician",
+        note: `Updated test record "${recordPayload.testTypeName}" (${recordPayload.date})`
+      });
       notify(anyMissing ? "Test record updated, but one or more linked chemicals no longer exist in inventory." : "Test record updated. Inventory adjusted accordingly.", anyMissing ? "warn" : "ok");
       resetForm();
       onDoneEditing && onDoneEditing();
@@ -933,6 +1030,14 @@ function AddTestTab({
         ...recordPayload
       };
       setTestRecords(prev => [...prev, newRecord]);
+      DataService.appendAudit({
+        entity: "testRecord",
+        entityId: newRecordId,
+        action: "create",
+        user: session?.username || tester || "System",
+        role: session?.role || "Technician",
+        note: `Created test record "${recordPayload.testTypeName}" (${recordPayload.date})`
+      });
       const actingUser = session || {
         name: tester || "System",
         role: "Technician"
@@ -988,6 +1093,11 @@ function AddTestTab({
   // validation failures).
   function handleSave() {
     if (savingRef.current) return;
+    const saveGate = editingRecord ? trEditGateForSave : trCreateGate;
+    if (!saveGate.allowed) {
+      notify?.(`Guest access can't ${editingRecord ? "edit" : "add"} test records — this login is view-only for this action.`, "warn");
+      return;
+    }
     savingRef.current = true;
     try {
       handleSaveInner();
@@ -1599,7 +1709,14 @@ function AddTestTab({
     right: /*#__PURE__*/React.createElement(Button, {
       variant: "outline",
       size: "sm",
-      onClick: () => setShowResultUploadModal(true)
+      onClick: () => {
+        const uploadGate = editingRecord ? trEditGateForSave : trCreateGate;
+        if (!uploadGate.allowed) {
+          notify?.(`Guest access can't ${editingRecord ? "edit" : "add"} test records — this login is view-only for this action.`, "warn");
+          return;
+        }
+        setShowResultUploadModal(true);
+      }
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "upload",
       size: 12
@@ -1666,69 +1783,94 @@ function AddTestTab({
     name: qcEvaluation.pass ? "check" : "warning",
     size: 13
   }), qcEvaluation.message), matchedQcRule && isBracketing && /*#__PURE__*/React.createElement("div", {
-    className: "mt-2"
+    className: "mt-2 p-3 rounded"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs mb-2",
-    style: {
-      color: C.muted
-    }
-  }, "Insert a QC checkpoint (a known standard/control) before the first sample, after the last sample, and every ", matchedQcRule.bracketingInterval || "N", " samples in between — the usual bracketing/interspersed pattern for a run."), /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 mb-2"
-  }, /*#__PURE__*/React.createElement(Button, {
-    variant: "outline",
+    className: "text-xs mb-3 font-medium text-gray-700"
+  }, "Configure Bracketing Checkpoints for this run"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2 items-center mb-3 p-2 bg-gray-50 rounded border"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-xs font-medium whitespace-nowrap"
+  }, "Number of QC Samples:"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    value: numQcCheckpoints,
+    onChange: e => setNumQcCheckpoints(e.target.value),
+    className: "border rounded px-2 py-1 w-16 text-xs text-center",
+    min: 1
+  }), /*#__PURE__*/React.createElement(Button, {
+    variant: "primary",
     size: "sm",
-    onClick: autoLayoutBracketingPoints
+    onClick: generateQcCheckpoints
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "clipboard",
     size: 12
-  }), "Auto-Layout Checkpoints", bracketingRunLength ? ` (run of ${bracketingRunLength})` : ""), /*#__PURE__*/React.createElement(Button, {
+  }), "Generate Slots"), /*#__PURE__*/React.createElement(Button, {
     variant: "ghost",
     size: "sm",
     onClick: () => addBracketingPoint()
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 12
-  }), "Add Checkpoint")), bracketingPoints.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "text-xs p-2 rounded",
-    style: {
-      background: C.infoBg,
-      color: C.info
-    }
-  }, "No checkpoints yet — use Auto-Layout or add them one at a time.") : /*#__PURE__*/React.createElement("div", {
-    className: "grid gap-1.5"
-  }, bracketingPoints.map(p => {
-    const ev = p.value !== "" ? evaluateQcRule(matchedQcRule, p.value) : null;
+  }), "Add One")), bracketingPoints.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "text-xs p-2 rounded text-gray-500 text-center"
+  }, "Select the number of QC samples you need and click Generate Slots.") : /*#__PURE__*/React.createElement("div", {
+    className: "grid gap-2"
+  }, bracketingPoints.map((p, idx) => {
+    const level = resolveBracketingLevel(p);
+    const ev = p.value !== "" ? (!level ? {
+      pass: null,
+      message: "Select a QC Standard for this checkpoint first."
+    } : evaluateQcRule({
+      comparator: level.comparator,
+      limitLow: level.limitLow,
+      limitHigh: level.limitHigh,
+      unit: matchedQcRule?.unit
+    }, p.value)) : null;
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
-      className: "flex items-center gap-2 text-xs p-1.5 rounded",
+      className: "flex flex-col gap-1"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-2 text-xs p-2 rounded border bg-white shadow-sm",
       style: {
-        background: ev ? ev.pass ? C.okBg : C.warnBg : C.bg
+        borderColor: ev ? ev.pass ? C.okBg : C.warnBg : C.border
       }
-    }, /*#__PURE__*/React.createElement("input", {
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "w-5 text-gray-400 font-mono text-right"
+    }, idx + 1, "."), /*#__PURE__*/React.createElement("div", {
+      className: "flex-1"
+    }, /*#__PURE__*/React.createElement("select", {
       value: p.label,
-      onChange: e => updateBracketingPoint(p.id, {
-        label: e.target.value
-      }),
-      className: "border rounded px-2 py-1 flex-1",
-      style: {
-        borderColor: C.border
-      }
-    }), /*#__PURE__*/React.createElement("input", {
+      onChange: e => {
+        const val = e.target.value;
+        const selected = (matchedQcRule.bracketingConcentrations || []).find(c => c.label === val);
+        updateBracketingPoint(p.id, {
+          label: val,
+          targetValue: selected ? selected.value : "",
+          comparator: selected ? selected.comparator : "",
+          limitLow: selected ? selected.limitLow : "",
+          limitHigh: selected ? selected.limitHigh : ""
+        });
+      },
+      className: "border rounded px-2 py-1.5 w-full bg-gray-50"
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "-- Select QC Standard --"), (matchedQcRule.bracketingConcentrations || []).map(c => /*#__PURE__*/React.createElement("option", {
+      key: c.id,
+      value: c.label || "Std"
+    }, c.label || "Std")))), /*#__PURE__*/React.createElement("input", {
       type: "number",
-      placeholder: `Value${matchedQcRule.unit ? ` (${matchedQcRule.unit})` : ""}`,
+      placeholder: `Measured Value${matchedQcRule.unit ? ` (${matchedQcRule.unit})` : ""}`,
       value: p.value,
       onChange: e => updateBracketingPoint(p.id, {
         value: e.target.value
       }),
-      className: "border rounded px-2 py-1 w-32",
-      style: {
-        borderColor: C.border
-      }
-    }), ev && /*#__PURE__*/React.createElement(Icon, {
+      className: "border rounded px-2 py-1.5 w-32"
+    }, null), ev && /*#__PURE__*/React.createElement("span", {
+      title: ev.message
+    }, /*#__PURE__*/React.createElement(Icon, {
       name: ev.pass ? "check" : "warning",
       size: 13,
       color: ev.pass ? C.ok : C.warn
-    }), /*#__PURE__*/React.createElement("button", {
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: () => removeBracketingPoint(p.id),
       title: "Remove checkpoint",
       style: {
@@ -1737,7 +1879,12 @@ function AddTestTab({
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "trash",
       size: 13
-    })));
+    }))), ev && /*#__PURE__*/React.createElement("div", {
+      className: "text-[11px] pl-7",
+      style: {
+        color: ev.pass ? C.ok : C.warn
+      }
+    }, ev.message));
   })), bracketingEvaluated.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "mt-2 text-xs font-medium p-2 rounded flex items-center gap-1.5",
     style: {
@@ -2009,12 +2156,97 @@ function TestRecordsTab({
   testTypes,
   parameters,
   session,
+  permissionMatrix,
   goToSample,
   goToResultsWorkflow,
   notify,
   onEditRecord
 }) {
   const [deleteRecord, setDeleteRecord] = useState(null);
+  const trEditGate = permGate(permissionMatrix, session, "testRecords", "edit", notify, "edit test records");
+  const trDeleteGate = permGate(permissionMatrix, session, "testRecords", "delete", notify, "delete test records");
+  const canEditRecords = trEditGate.visible;
+  const canDeleteRecords = trDeleteGate.visible;
+  // Archiving a Test Record is an edit to its own lifecycle (moving it out
+  // of the active list), gated on the testRecords module itself — the
+  // separate "archive" module permission instead governs the Archive tab's
+  // own Restore action (see 18-archive-ui.js).
+  const trArchiveGate = trEditGate;
+  const canArchiveRecords = trArchiveGate.visible;
+  const [archiveSelection, setArchiveSelection] = useState([]);
+  const [archivingId, setArchivingId] = useState(null);
+  const [bulkArchiving, setBulkArchiving] = useState(false);
+  // A record can only be archived once every sample it covers has reached
+  // the final "released" stage for this record's test type — see
+  // isTestRecordArchivable() near the top of this file.
+  const isArchivable = React.useCallback(r => isTestRecordArchivable(r, samples, testRecords, subBatches), [samples, testRecords, subBatches]);
+  function toggleArchiveSelect(id) {
+    setArchiveSelection(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  async function archiveOne(rec) {
+    setArchivingId(rec.id);
+    try {
+      await DataService.archiveTestRecord(rec.id, {
+        testRecords,
+        samples
+      });
+      setTestRecords(prev => prev.filter(r => r.id !== rec.id));
+      setArchiveSelection(prev => prev.filter(x => x !== rec.id));
+      DataService.appendAudit({
+        entity: "testRecord",
+        entityId: rec.id,
+        action: "archive",
+        user: session.username,
+        role: session.role,
+        note: `Archived "${rec.testTypeName}" (${rec.date})`
+      });
+      notify(`Archived "${rec.testTypeName}" (${rec.date}). Find it any time in the Archive tab.`, "ok");
+    } catch (e) {
+      notify(`Archive failed: ${e.message}`, "warn");
+    } finally {
+      setArchivingId(null);
+    }
+  }
+  async function archiveSelectedRecords() {
+    const ids = archiveSelection.filter(id => {
+      const rec = testRecords.find(r => r.id === id);
+      return rec && isArchivable(rec);
+    });
+    if (ids.length === 0) {
+      notify("Nothing eligible selected — only fully Released records can be archived.", "warn");
+      return;
+    }
+    setBulkArchiving(true);
+    let archivedCount = 0;
+    for (const id of ids) {
+      try {
+        // Don't pass `testRecords` here — it's a stale snapshot from this
+        // render and won't reflect records already archived earlier in
+        // this same loop. Passing `samples` alone is safe since archiving
+        // never changes the samples collection.
+        await DataService.archiveTestRecord(id, {
+          samples
+        });
+        archivedCount++;
+      } catch (e) {
+        notify(`Couldn't archive one record: ${e.message}`, "warn");
+      }
+    }
+    setTestRecords(prev => prev.filter(r => !ids.includes(r.id)));
+    setArchiveSelection([]);
+    setBulkArchiving(false);
+    if (archivedCount > 0) {
+      DataService.appendAudit({
+        entity: "testRecord",
+        entityId: ids.join(","),
+        action: "archive",
+        user: session.username,
+        role: session.role,
+        note: `Bulk-archived ${archivedCount} record(s)`
+      });
+      notify(`Archived ${archivedCount} record(s). Find them any time in the Archive tab.`, "ok");
+    }
+  }
   // Resolves the Reference behind a record — via its single sample, or (for
   // an Analytical Batch record) its first member sample. Used for the
   // structured Batch Identifier badge (4.1).
@@ -2036,6 +2268,14 @@ function TestRecordsTab({
     if (rec.gasLog && rec.gasLog.length > 0) setGasList(prev => restoreGasConsumption(prev, rec.gasLog));
     setTestRecords(prev => prev.filter(r => r.id !== rec.id));
     setDeleteRecord(null);
+    DataService.appendAudit({
+      entity: "testRecord",
+      entityId: rec.id,
+      action: "delete",
+      user: session.username,
+      role: session.role,
+      note: `Deleted test record "${rec.testTypeName}" (${rec.date})`
+    });
     notify("Test record deleted — consumed chemical/gas amounts were restored.");
   }
   const q = search.trim().toLowerCase();
@@ -2095,7 +2335,14 @@ function TestRecordsTab({
       style: {
         borderColor: C.border
       }
-    })), /*#__PURE__*/React.createElement(Button, {
+    })), canArchiveRecords && archiveSelection.length > 0 && /*#__PURE__*/React.createElement(Button, {
+      size: "sm",
+      onClick: trArchiveGate.guard(archiveSelectedRecords),
+      loading: bulkArchiving
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "archive",
+      size: 13
+    }), `Archive Selected (${archiveSelection.length})`), /*#__PURE__*/React.createElement(Button, {
       size: "sm",
       variant: "outline",
       onClick: exportFiltered
@@ -2195,7 +2442,12 @@ function TestRecordsTab({
     })()), /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-3 shrink-0 ml-auto",
       onClick: e => e.stopPropagation()
-    }, /*#__PURE__*/React.createElement("span", {
+    }, canArchiveRecords && isArchivable(r) && /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      title: "Select for bulk archiving",
+      checked: archiveSelection.includes(r.id),
+      onChange: () => toggleArchiveSelect(r.id)
+    }), /*#__PURE__*/React.createElement("span", {
       className: "text-xs shrink-0",
       style: {
         color: C.muted
@@ -2218,16 +2470,22 @@ function TestRecordsTab({
       tone: "ok"
     }, "Total Cost: BDT ", fmtNum(liveUnitCost * billedSamplesForRow)), /*#__PURE__*/React.createElement("div", {
       className: "flex items-center gap-1"
-    }, /*#__PURE__*/React.createElement(IconButton, {
+    }, canEditRecords && /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
       color: C.teal,
       title: "Edit full test record",
-      onClick: () => onEditRecord(r)
-    }), /*#__PURE__*/React.createElement(IconButton, {
+      onClick: trEditGate.guard(() => onEditRecord(r))
+    }), canArchiveRecords && isArchivable(r) && /*#__PURE__*/React.createElement(IconButton, {
+      name: "archive",
+      color: C.ok,
+      title: "Archive this completed record",
+      disabled: archivingId === r.id,
+      onClick: trArchiveGate.guard(() => archiveOne(r))
+    }), canDeleteRecords && /*#__PURE__*/React.createElement(IconButton, {
       name: "trash",
       color: C.warn,
       title: "Delete record",
-      onClick: () => setDeleteRecord(r)
+      onClick: trDeleteGate.guard(() => setDeleteRecord(r))
     })))), isOpen && /*#__PURE__*/React.createElement("div", {
       className: "px-4 py-3 text-xs grid grid-cols-2 md:grid-cols-3 gap-3",
       style: {

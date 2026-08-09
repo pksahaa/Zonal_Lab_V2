@@ -1976,6 +1976,7 @@ function ReportsTab({
   subBatches,
   users,
   session,
+  permissionMatrix,
   notify,
   goToSample,
   onLoadDemoData
@@ -2062,6 +2063,7 @@ function ReportsTab({
     subBatches,
     users,
     session,
+    permissionMatrix,
     goToSample,
     notify
   };

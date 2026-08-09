@@ -278,10 +278,94 @@ const ROLE_PERMISSIONS = {
     canReview: true,
     canApprove: true,
     canRelease: true
+  },
+  // Explicit entry required — without it, permissionsFor("Guest") falls
+  // through to the Technician default below and Guest silently inherits
+  // full register/assign/enter/delete rights on samples. Never rely on the
+  // fallback for a role that's supposed to be locked down.
+  Guest: {
+    canRegister: false,
+    canAssign: false,
+    canEnterResults: false,
+    canReview: false,
+    canApprove: false,
+    canRelease: false
   }
 };
-function permissionsFor(role) {
-  return ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.Technician;
+const NO_SAMPLE_PERMISSIONS = {
+  canRegister: false,
+  canAssign: false,
+  canEnterResults: false,
+  canReview: false,
+  canApprove: false,
+  canRelease: false
+};
+const SAMPLE_PERMISSION_ACTIONS = ["canRegister", "canAssign", "canEnterResults", "canReview", "canApprove", "canRelease"];
+
+// permissionsFor() used to take just a role string and look straight into
+// ROLE_PERMISSIONS — role-based only, no way to grant or revoke one
+// person's register/assign/review/approve/release access without moving
+// them into a whole new role. It now takes the shared Module × Action
+// permission matrix (permissionMatrix — see 41-rbac-ui.js, where the
+// "samples" module lives alongside Test Records/Inventory/etc.) plus the
+// full session, so a per-user override — session.overrides.samples.<action>,
+// set via the same "Custom permissions for this user" editor every other
+// module uses — always wins over the role default, exactly like the rest
+// of the app's permission checks (see can() in 41-rbac-ui.js, whose
+// resolution order this deliberately mirrors). Duplicated in miniature
+// here rather than calling can() directly, since this file loads before
+// 41-rbac-ui.js and every other file in this app follows the convention
+// that later files may depend on earlier ones, never the reverse.
+// Administrator is still always fully trusted regardless of matrix state.
+// ROLE_PERMISSIONS above remains the seed data for the matrix's "samples"
+// column (see DEFAULT_PERMISSION_MATRIX in 41-rbac-ui.js) and is used here
+// as a defensive fallback if a role is somehow missing a "samples" entry
+// in the matrix (e.g. mid-migration) — matching pre-override behavior
+// exactly in that case.
+function permissionsFor(matrix, session) {
+  const role = session?.role;
+  const perms = {};
+  SAMPLE_PERMISSION_ACTIONS.forEach(action => {
+    if (role === "Administrator") {
+      perms[action] = true;
+      return;
+    }
+    const override = session?.overrides?.samples?.[action];
+    if (override === true || override === false) {
+      perms[action] = override;
+      return;
+    }
+    // Defaulting an unrecognized role to Technician's access was the bug
+    // that let Guest inherit register/delete rights before "Guest" was
+    // added above — any future unlisted or misspelled role still safely
+    // gets NO access instead of quietly inheriting Technician's.
+    const roleDefaults = matrix?.[role]?.samples || ROLE_PERMISSIONS[role] || NO_SAMPLE_PERMISSIONS;
+    perms[action] = !!roleDefaults[action];
+  });
+  return perms;
+}
+
+// ---- sampleActionGate(): the same Guest-visible-but-blocked idea as
+// permGate() in 41-rbac-ui.js, but built on permissionsFor()'s fine-grained
+// canRegister/canAssign/canEnterResults/canReview/canApprove/canRelease
+// booleans instead of the generic Module × Action matrix. Guest sees every
+// stage and every action button in Results Workflow / Sample Registration —
+// nothing hidden — but a click on a step it isn't permissioned for blocks
+// with a message instead of running. Every other role keeps the existing
+// convention: hidden entirely when not permitted.
+function sampleActionGate(perms, actionKey, session, notify, actionLabel) {
+  const allowed = !!perms?.[actionKey];
+  const isGuest = session?.role === "Guest";
+  return {
+    allowed,
+    visible: allowed || isGuest,
+    guard(handler) {
+      return (...args) => {
+        if (allowed) return handler(...args);
+        notify?.(`Guest access can't ${actionLabel || "do that"} — this login is view-only for this action.`, "warn");
+      };
+    }
+  };
 }
 
 // ---- sample code generator: WQ-<year>-###### sequential per year ----

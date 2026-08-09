@@ -14,17 +14,49 @@
 // Everything else below is byte-for-byte the original V14 behaviour.
 // ============================================================================
 function AppRoot() {
-  const [users] = useState(() => loadKey("users", seedUsers()));
+  const [users, setUsers] = useState(() => loadKey("users", seedUsers()));
+  const [permissionMatrix, setPermissionMatrixState] = useState(() => backfillSamplePermissions(loadKey("permissionMatrix", DEFAULT_PERMISSION_MATRIX)));
   const [session, setSession] = useState(() => loadKey("session", null));
   useEffect(() => {
     saveKey("users", users);
   }, [users]);
+  useEffect(() => {
+    saveKey("permissionMatrix", permissionMatrix);
+  }, [permissionMatrix]);
+  // Session needs re-syncing if the logged-in user's own record changes
+  // (role edited, permissions customized, or reactivated/deactivated)
+  // while they're mid-session.
+  useEffect(() => {
+    if (!session) return;
+    const fresh = users.find(u => u.id === session.userId);
+    if (!fresh) return;
+    if (fresh.active === false) {
+      handleLogout();
+      return;
+    }
+    const freshOverrides = fresh.permissionOverrides || {};
+    if (fresh.role !== session.role || fresh.name !== session.name || JSON.stringify(freshOverrides) !== JSON.stringify(session.overrides || {})) {
+      const nextSess = {
+        ...session,
+        role: fresh.role,
+        name: fresh.name,
+        overrides: freshOverrides
+      };
+      setSession(nextSess);
+      saveKey("session", nextSess);
+    }
+    // eslint-disable-next-line
+  }, [users]);
+  function setPermissionMatrix(updater) {
+    setPermissionMatrixState(updater);
+  }
   function handleLogin(user) {
     const sess = {
       userId: user.id,
       name: user.name,
       username: user.username,
       role: user.role,
+      overrides: user.permissionOverrides || {},
       ts: Date.now()
     };
     setSession(sess);
@@ -42,7 +74,10 @@ function AppRoot() {
   return /*#__PURE__*/React.createElement(LabApp, {
     session: session,
     onLogout: handleLogout,
-    users: users
+    users: users,
+    setUsers: setUsers,
+    permissionMatrix: permissionMatrix,
+    setPermissionMatrix: setPermissionMatrix
   });
 }
 
@@ -52,7 +87,10 @@ function AppRoot() {
 function LabApp({
   session,
   onLogout,
-  users
+  users,
+  setUsers,
+  permissionMatrix,
+  setPermissionMatrix
 }) {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("dashboard");
@@ -84,6 +122,12 @@ function LabApp({
   const [invTab, setInvTab] = useState("equipment");
   const [testConfigTab, setTestConfigTab] = useState("parameters");
   const [reportTab, setReportTab] = useState("executive");
+  // Archive tab route. Deliberately just a tab switch — archived data is
+  // fetched on-demand by ArchiveTab itself when it mounts, never as part of
+  // the initial app-load sequence below (see the loadAll effect).
+  function goToArchive() {
+    setTab("archive");
+  }
   // Header used to line up 6 always-visible controls (lang, theme, backend
   // settings, lab identity, user pill, logout) — crowded on anything less
   // than a wide desktop. Backend/Lab Identity now live behind one
@@ -299,7 +343,12 @@ function LabApp({
     style: {
       color: C.headerTextMuted
     }
-  }, t("appSub"))), /*#__PURE__*/React.createElement("div", {
+  }, t("appSub")), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] opacity-60",
+    style: {
+      color: C.headerTextMuted
+    }
+  }, "Build ", APP_BUILD)), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 text-xs no-print relative",
     style: {
       color: C.headerText
@@ -360,7 +409,7 @@ function LabApp({
       border: `1px solid ${C.border}`,
       zIndex: 50
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, can(permissionMatrix, session, "settings", "view") && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowBackendSettings(true);
       closeHeaderMenus();
@@ -373,7 +422,7 @@ function LabApp({
     name: "link",
     size: 13,
     color: C.muted
-  }), "Backend Settings"), /*#__PURE__*/React.createElement("button", {
+  }), "Backend Settings"), can(permissionMatrix, session, "settings", "view") && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowLabIdentitySettings(true);
       closeHeaderMenus();
@@ -468,32 +517,69 @@ function LabApp({
   }, {
     k: "inventory",
     label: t("inventory"),
-    icon: "flask"
+    icon: "flask",
+    moduleKey: "inventory"
   }, {
     k: "testConfig",
     label: t("testConfiguration"),
-    icon: "layers"
+    icon: "layers",
+    moduleKey: "testTypes"
   }, {
     k: "addTest",
     label: t("addTest"),
-    icon: "clipboard"
+    icon: "clipboard",
+    moduleKey: "testRecords",
+    moduleAction: "create"
   }, {
     k: "testRecords",
     label: t("testRecords"),
-    icon: "edit"
+    icon: "edit",
+    moduleKey: "testRecords"
   }, {
     k: "reports",
     label: t("reports"),
-    icon: "chart"
+    icon: "chart",
+    moduleKey: "reports"
   }, {
     k: "qc",
     label: "QC",
-    icon: "chart"
-  }].map(t => /*#__PURE__*/React.createElement("button", {
+    icon: "chart",
+    moduleKey: "qc"
+  }, {
+    k: "archive",
+    label: t("archive"),
+    icon: "archive",
+    moduleKey: "archive"
+  }, {
+    k: "users",
+    label: "Users",
+    icon: "users",
+    moduleKey: "users"
+  }, {
+    k: "auditLog",
+    label: "Audit Log",
+    icon: "shield",
+    moduleKey: "auditLog"
+  }].filter(t => {
+    if (!t.moduleKey) return true;
+    if (can(permissionMatrix, session, t.moduleKey, t.moduleAction || "view")) return true;
+    // Guest is meant to browse the whole app like an Administrator would —
+    // every tab stays visible, even ones whose action it can't use (the
+    // page itself blocks the actual mutation with a message — see
+    // permGate() in 41-rbac-ui.js). Users & Audit Log are the deliberate
+    // exception: the default matrix hides those from Guest at the "view"
+    // level itself (see DEFAULT_PERMISSION_MATRIX.Guest in 41-rbac-ui.js),
+    // so they stay hidden here too.
+    return session?.role === "Guest" && t.moduleKey !== "users" && t.moduleKey !== "auditLog";
+  }).map(t => /*#__PURE__*/React.createElement("button", {
     key: t.k,
     onClick: () => {
       if (t.k !== "addTest") setEditingRecord(null);
-      setTab(t.k);
+      if (t.k === "archive") {
+        goToArchive();
+      } else {
+        setTab(t.k);
+      }
     },
     className: `flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t border-b-2 transition-colors ${tab === t.k ? "" : "hover:bg-white/10 hover:text-white"}`,
     style: {
@@ -533,6 +619,7 @@ function LabApp({
     equipment: equipment,
     users: users,
     session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify,
     focusSampleId: focusSampleId,
     setFocusSampleId: setFocusSampleId,
@@ -559,6 +646,8 @@ function LabApp({
     setGasList: setGasList,
     testTypes: testTypes,
     testRecords: testRecords,
+    session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify
   }), tab === "testConfig" && /*#__PURE__*/React.createElement(TestConfigurationTab, {
     testConfigTab: testConfigTab,
@@ -576,6 +665,8 @@ function LabApp({
     masterChemicals: masterChemicals,
     setMasterChemicals: setMasterChemicals,
     testRecords: testRecords,
+    session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify
   }), tab === "addTest" && /*#__PURE__*/React.createElement(AddTestTab, {
     testTypes: testTypes,
@@ -593,6 +684,7 @@ function LabApp({
     subBatches: subBatches,
     setSubBatches: setSubBatches,
     session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify,
     goToSample: goToSample,
     editingRecord: editingRecord,
@@ -618,6 +710,7 @@ function LabApp({
     testTypes: testTypes,
     parameters: parameters,
     session: session,
+    permissionMatrix: permissionMatrix,
     goToSample: goToSample,
     goToResultsWorkflow: goToResultsWorkflow,
     notify: notify,
@@ -640,12 +733,32 @@ function LabApp({
     subBatches: subBatches,
     users: users,
     session: session,
+    permissionMatrix: permissionMatrix,
     notify: notify,
     goToSample: goToSample,
     onLoadDemoData: loadDemoReportData
   }), tab === "qc" && /*#__PURE__*/React.createElement(QcModuleTab, {
     testTypes: testTypes,
     testRecords: testRecords
+  }), tab === "archive" && /*#__PURE__*/React.createElement(ArchiveTab, {
+    testTypes: testTypes,
+    samples: samples,
+    testRecords: testRecords,
+    setTestRecords: setTestRecords,
+    session: session,
+    permissionMatrix: permissionMatrix,
+    notify: notify,
+    goToSample: goToSample
+  }), tab === "users" && /*#__PURE__*/React.createElement(UsersAdminTab, {
+    users: users,
+    setUsers: setUsers,
+    permissionMatrix: permissionMatrix,
+    setPermissionMatrix: setPermissionMatrix,
+    session: session,
+    notify: notify
+  }), tab === "auditLog" && /*#__PURE__*/React.createElement(AuditLogTab, {
+    session: session,
+    permissionMatrix: permissionMatrix
   })), showBackendSettings && /*#__PURE__*/React.createElement(BackendSettingsModal, {
     notify: notify,
     onClose: () => setShowBackendSettings(false)

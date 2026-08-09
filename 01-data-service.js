@@ -14,8 +14,9 @@
 // Flipping the switch is a Settings-screen toggle, not a rewrite: nothing
 // that calls DataService needs to change.
 //
-// IMPORTANT — this file currently backs ONLY the new Sample Lifecycle module
-// (20-sample-model.js / 21-sample-ui.js) and the audit log. Chemicals, Test
+// IMPORTANT — this file currently backs the new Sample Lifecycle module
+// (20-sample-model.js / 21-sample-ui.js), the audit log, and the Archive
+// system's "archived_records" collection (18-archive-ui.js). Chemicals, Test
 // Types, Test Records, Equipment, Glassware and Gas still use the original
 // V14 localStorage mechanism (06-legacy-storage.js) so nothing about your
 // existing workflows changes in this phase. Migrating them onto DataService
@@ -188,6 +189,94 @@ const DataService = (() => {
     };
     return gasCall("ping", {});
   }
+
+  // ---- Archiving (Test Records → archived_records) --------------------
+  // Test Records (13-testrecords-ui.js) still live in the legacy V14
+  // localStorage mechanism (loadKey/saveKey, key "testRecords") — see the
+  // note at the top of this file. Samples, on the other hand, ARE already a
+  // DataService collection ("samples"). Archiving straddles both: it reads
+  // the record out of legacy storage and writes it into a brand-new
+  // DataService collection ("archived_records") so that collection gets
+  // GAS-backend support for free the moment Settings → Backend is switched
+  // to "gas" — nothing here needs to change when that happens.
+  //
+  // A completed record is denormalized at archive time: the sample(s) it
+  // references are snapshotted onto the archived record itself
+  // (archivedSampleSnapshots). That's deliberate — the whole point of
+  // archiving is to let this data drift out of the fast/active tables, so
+  // the archive can't depend on those live samples still being there (or
+  // still looking the same) later when someone searches, reprints, or
+  // exports it.
+  async function archiveTestRecord(recordId, opts = {}) {
+    const testRecordsArr = opts.testRecords || loadKey("testRecords", []);
+    const record = testRecordsArr.find(r => r.id === recordId);
+    if (!record) throw new Error(`Test record "${recordId}" was not found — it may already be archived.`);
+    const samplesArr = opts.samples || (await list("samples"));
+    const sampleIds = record.memberSampleIds && record.memberSampleIds.length ? record.memberSampleIds : record.sampleId ? [record.sampleId] : [];
+    const archivedSampleSnapshots = sampleIds.map(id => (samplesArr || []).find(s => s.id === id)).filter(Boolean);
+    const archivedRecord = {
+      ...record,
+      archivedAt: new Date().toISOString(),
+      archivedSampleSnapshots
+    };
+    await save("archived_records", archivedRecord);
+    saveKey("testRecords", testRecordsArr.filter(r => r.id !== recordId));
+    return archivedRecord;
+  }
+  // Matches an archived record against optional search filters. All filters
+  // are AND-ed together; an unset filter is simply skipped. sampleId and
+  // clientName match against the snapshot(s) taken at archive time (falling
+  // back to the record's own legacy sampleCode field for pre-Sub-Batch
+  // records); parameter matches either the test type's name or any one of
+  // the record's individual result parameter names.
+  function matchesArchiveQuery(rec, filters) {
+    const f = filters || {};
+    if (f.dateFrom && (rec.date || "") < f.dateFrom) return false;
+    if (f.dateTo && (rec.date || "") > f.dateTo) return false;
+    const snaps = rec.archivedSampleSnapshots || [];
+    if (f.sampleId && f.sampleId.trim()) {
+      const needle = f.sampleId.trim().toLowerCase();
+      const hit = snaps.some(s => (s.sampleCode || "").toLowerCase().includes(needle)) || (rec.sampleCode || "").toLowerCase().includes(needle);
+      if (!hit) return false;
+    }
+    if (f.clientName && f.clientName.trim()) {
+      const needle = f.clientName.trim().toLowerCase();
+      const hit = snaps.some(s => (s.clientName || "").toLowerCase().includes(needle));
+      if (!hit) return false;
+    }
+    if (f.parameter && f.parameter.trim()) {
+      const needle = f.parameter.trim().toLowerCase();
+      const allResultNames = (rec.results || []).concat((rec.memberResults || []).flatMap(m => m.results || [])).map(res => res.name || "");
+      const hit = (rec.testTypeName || "").toLowerCase().includes(needle) || allResultNames.some(n => n.toLowerCase().includes(needle));
+      if (!hit) return false;
+    }
+    return true;
+  }
+  // On-demand fetch — intentionally the ONLY way archived data enters memory.
+  // Nothing in the app's initial load calls this; it only runs when the
+  // Archive screen itself asks for it, and only for what a search actually
+  // matches, so the active appState stays exactly as light as it is today.
+  async function fetchArchivedRecords(queryFilters) {
+    const all = await list("archived_records");
+    return all.filter(rec => matchesArchiveQuery(rec, queryFilters));
+  }
+  async function restoreRecord(recordId) {
+    const archived = await list("archived_records");
+    const record = archived.find(r => r.id === recordId);
+    if (!record) throw new Error(`Archived record "${recordId}" was not found.`);
+    const {
+      archivedAt,
+      archivedSampleSnapshots,
+      ...restored
+    } = record;
+    const testRecordsArr = loadKey("testRecords", []);
+    if (!testRecordsArr.some(r => r.id === recordId)) {
+      saveKey("testRecords", [...testRecordsArr, restored]);
+    }
+    await remove("archived_records", recordId);
+    return restored;
+  }
+
   return {
     configure,
     getConfig,
@@ -197,7 +286,10 @@ const DataService = (() => {
     bulkSet,
     appendAudit,
     getAudit,
-    ping
+    ping,
+    archiveTestRecord,
+    fetchArchivedRecords,
+    restoreRecord
   };
 })();
 

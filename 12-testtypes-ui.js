@@ -726,7 +726,8 @@ function CollapsibleSection({
 // ============================================================================
 function ResultParameterEditor({
   resultParameters,
-  setResultParameters
+  setResultParameters,
+  linkedParameter
 }) {
   function addParam() {
     setResultParameters(prev => [...prev, {
@@ -795,29 +796,51 @@ function ResultParameterEditor({
     className: "flex items-start justify-between gap-2 mb-2"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-3 gap-2 flex-1"
-  }, /*#__PURE__*/React.createElement(TextField, {
-    label: "Result Name",
-    value: p.name,
-    onChange: e => updateParam(p.id, {
-      name: e.target.value
+  }, /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(TextField, {
+      label: "Result Name",
+      value: linkedParameter
+        ? (linkedParameter.shortName ? `${linkedParameter.name} (${linkedParameter.shortName})` : linkedParameter.name)
+        : p.name,
+      onChange: linkedParameter ? undefined : e => updateParam(p.id, { name: e.target.value }),
+      readOnly: !!linkedParameter,
+      placeholder: "e.g. Free Chlorine",
+      style: linkedParameter ? { background: "#f3f4f6", cursor: "not-allowed" } : undefined
     }),
-    placeholder: "e.g. Free Chlorine"
-  }), /*#__PURE__*/React.createElement(TextField, {
-    label: "Unit",
-    value: p.unit,
-    onChange: e => updateParam(p.id, {
-      unit: e.target.value
+    linkedParameter && /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] mt-0.5",
+      style: { color: C.teal }
+    }, "\u2190 auto-filled from linked parameter")
+  ), /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(TextField, {
+      label: "Unit",
+      value: linkedParameter ? (linkedParameter.unit || "") : p.unit,
+      onChange: linkedParameter ? undefined : e => updateParam(p.id, { unit: e.target.value }),
+      readOnly: !!linkedParameter,
+      placeholder: "e.g. mg/L",
+      style: linkedParameter ? { background: "#f3f4f6", cursor: "not-allowed" } : undefined
     }),
-    placeholder: "e.g. mg/L"
-  }), /*#__PURE__*/React.createElement(TextField, {
-    label: "Round To (decimals)",
-    type: "number",
-    min: "0",
-    value: p.roundTo,
-    onChange: e => updateParam(p.id, {
-      roundTo: Number(e.target.value) || 0
-    })
-  })), /*#__PURE__*/React.createElement("button", {
+    linkedParameter && /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] mt-0.5",
+      style: { color: C.teal }
+    }, "\u2190 auto-filled from linked parameter")
+  ), /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(TextField, {
+      label: "Round To (decimals)",
+      type: "number",
+      min: "0",
+      value: linkedParameter
+        ? (linkedParameter.decimalPlaces != null ? linkedParameter.decimalPlaces : p.roundTo)
+        : p.roundTo,
+      onChange: linkedParameter ? undefined : e => updateParam(p.id, { roundTo: Number(e.target.value) || 0 }),
+      readOnly: !!linkedParameter,
+      style: linkedParameter ? { background: "#f3f4f6", cursor: "not-allowed" } : undefined
+    }),
+    linkedParameter && /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] mt-0.5",
+      style: { color: C.teal }
+    }, "\u2190 auto-filled from linked parameter")
+  )), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeParam(p.id),
     className: "mt-5 p-1.5 rounded",
     style: {
@@ -985,7 +1008,8 @@ function FormulaTryIt({
 // ============================================================================
 function QcRuleEditor({
   qcRules,
-  setQcRules
+  setQcRules,
+  linkedParameter
 }) {
   function addRule() {
     setQcRules(prev => [...prev, {
@@ -995,11 +1019,13 @@ function QcRuleEditor({
       comparator: "lt",
       limitLow: 0,
       limitHigh: 0,
-      unit: "",
+      unit: linkedParameter ? (linkedParameter.unit || "") : "",
       notes: "",
       targetMean: null,
       targetSD: null,
-      bracketingInterval: null
+      bracketingInterval: null,
+      bracketingIncludesBlank: true,
+      bracketingConcentrations: [{ id: uid("bkc"), label: "", value: "", comparator: "between", limitLow: 0, limitHigh: 0 }]
     }]);
   }
   function update(id, patch) {
@@ -1056,35 +1082,41 @@ function QcRuleEditor({
     size: 14
   }))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2"
-  }, /*#__PURE__*/React.createElement(SelectField, {
+  }, r.qcType !== "bracketing" && /*#__PURE__*/React.createElement(SelectField, {
     label: "Comparator",
     value: r.comparator,
     onChange: e => update(r.id, {
       comparator: e.target.value
     }),
     options: QC_COMPARATORS
-  }), /*#__PURE__*/React.createElement(TextField, {
+  }), r.qcType !== "bracketing" && /*#__PURE__*/React.createElement(TextField, {
     label: r.comparator === "between" ? "Lower Limit" : "Limit",
     type: "number",
     value: r.limitLow,
     onChange: e => update(r.id, {
       limitLow: Number(e.target.value) || 0
     })
-  }), r.comparator === "between" && /*#__PURE__*/React.createElement(TextField, {
+  }), r.qcType !== "bracketing" && r.comparator === "between" && /*#__PURE__*/React.createElement(TextField, {
     label: "Upper Limit",
     type: "number",
     value: r.limitHigh,
     onChange: e => update(r.id, {
       limitHigh: Number(e.target.value) || 0
     })
-  }), /*#__PURE__*/React.createElement(TextField, {
-    label: "Unit",
-    value: r.unit,
-    onChange: e => update(r.id, {
-      unit: e.target.value
+  }), /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(TextField, {
+      label: "Unit",
+      value: linkedParameter ? (linkedParameter.unit || "") : r.unit,
+      onChange: linkedParameter ? undefined : e => update(r.id, { unit: e.target.value }),
+      readOnly: !!linkedParameter,
+      placeholder: "e.g. %, mg/L",
+      style: linkedParameter ? { background: "#f3f4f6", cursor: "not-allowed" } : undefined
     }),
-    placeholder: "e.g. %, mg/L"
-  })), /*#__PURE__*/React.createElement("div", {
+    linkedParameter && /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] mt-0.5",
+      style: { color: C.teal }
+    }, "\u2190 auto-filled from linked parameter")
+  )), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 md:grid-cols-2 gap-2 mt-2"
   }, /*#__PURE__*/React.createElement(TextField, {
     label: "Target Mean (optional, for QC control chart)",
@@ -1102,15 +1134,131 @@ function QcRuleEditor({
       targetSD: e.target.value === "" ? null : Number(e.target.value)
     }),
     placeholder: "leave blank to auto-calculate"
-  })), r.qcType === "bracketing" && /*#__PURE__*/React.createElement(TextField, {
-    label: "Bracketing Interval (insert a QC checkpoint every N field samples)",
-    type: "number",
-    value: r.bracketingInterval ?? "",
-    onChange: e => update(r.id, {
-      bracketingInterval: e.target.value === "" ? null : Number(e.target.value)
+  })), r.qcType === "bracketing" && /*#__PURE__*/React.createElement("div", {
+    className: "mt-2 rounded p-2.5",
+    style: { border: `1px solid ${C.border}`, background: C.bg }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      className: "text-xs font-semibold mb-2",
+      style: { color: C.ink }
+    }, "Bracketing QC Design"),
+    /*#__PURE__*/React.createElement(TextField, {
+      label: "Bracketing Interval (insert a QC checkpoint every N field samples)",
+      type: "number",
+      value: r.bracketingInterval ?? "",
+      onChange: e => update(r.id, {
+        bracketingInterval: e.target.value === "" ? null : Number(e.target.value)
+      }),
+      placeholder: "e.g. 10 — also brackets the very first and last sample"
     }),
-    placeholder: "e.g. 10 — also brackets the very first and last sample"
-  }), /*#__PURE__*/React.createElement("div", {
+    /*#__PURE__*/React.createElement("label", {
+      className: "flex items-center gap-2 text-xs mt-2",
+      style: { color: C.ink }
+    },
+      /*#__PURE__*/React.createElement("input", {
+        type: "checkbox",
+        checked: r.bracketingIncludesBlank !== false,
+        onChange: e => update(r.id, { bracketingIncludesBlank: e.target.checked })
+      }),
+      "Include a Blank sample at the start of each bracketing sequence"
+    ),
+    /*#__PURE__*/React.createElement("div", { className: "mt-2" },
+      /*#__PURE__*/React.createElement("div", {
+        className: "text-xs font-medium mb-1",
+        style: { color: C.muted }
+      }, "Known Concentration Standards (placed at each bracketing interval)"),
+      /*#__PURE__*/React.createElement("div", {
+        className: "text-[11px] mb-2 p-1.5 rounded",
+        style: { background: C.infoBg, color: C.info }
+      }, "\"Target Value\" is just a reference label for the tester (the nominal strength of that standard). Pass/fail at Add Test Record is decided ONLY by that standard's own Comparator and Limit(s) below — set both for every standard, or its checkpoint can never be evaluated."),
+      (r.bracketingConcentrations || []).map((bc, idx) =>
+        /*#__PURE__*/React.createElement("div", {
+          key: bc.id,
+          className: "p-2 rounded mb-2",
+          style: { background: "#fff", border: `1px solid ${C.border}` }
+        },
+          /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-2 mb-2" },
+            /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+              /*#__PURE__*/React.createElement("span", { className: "text-[11px] font-mono", style: { color: C.muted } }, idx + 1 + "."),
+              /*#__PURE__*/React.createElement("div", { className: "flex-1" },
+                /*#__PURE__*/React.createElement(TextField, {
+                  label: "Label",
+                  value: bc.label,
+                  onChange: e => update(r.id, {
+                    bracketingConcentrations: (r.bracketingConcentrations || []).map(x =>
+                      x.id === bc.id ? { ...x, label: e.target.value } : x
+                    )
+                  }),
+                  placeholder: "e.g. Low Std"
+                })
+              )
+            ),
+            /*#__PURE__*/React.createElement("div", { className: "flex items-center gap-2" },
+              /*#__PURE__*/React.createElement("div", { className: "flex-1" },
+                /*#__PURE__*/React.createElement(TextField, {
+                  label: `Target Value${linkedParameter?.unit ? ` (${linkedParameter.unit})` : ""}`,
+                  type: "number",
+                  value: bc.value,
+                  onChange: e => update(r.id, {
+                    bracketingConcentrations: (r.bracketingConcentrations || []).map(x =>
+                      x.id === bc.id ? { ...x, value: e.target.value } : x
+                    )
+                  })
+                })
+              ),
+              (r.bracketingConcentrations || []).length > 1 &&
+                /*#__PURE__*/React.createElement("button", {
+                  onClick: () => update(r.id, {
+                    bracketingConcentrations: (r.bracketingConcentrations || []).filter(x => x.id !== bc.id)
+                  }),
+                  className: "mt-5 p-1.5",
+                  style: { color: C.warn }
+                }, /*#__PURE__*/React.createElement(Icon, { name: "trash", size: 14 }))
+            )
+          ),
+          /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-2" },
+            /*#__PURE__*/React.createElement(SelectField, {
+              label: "Comparator",
+              value: bc.comparator || "between",
+              onChange: e => update(r.id, {
+                bracketingConcentrations: (r.bracketingConcentrations || []).map(x =>
+                  x.id === bc.id ? { ...x, comparator: e.target.value } : x
+                )
+              }),
+              options: QC_COMPARATORS
+            }),
+            /*#__PURE__*/React.createElement(TextField, {
+              label: (bc.comparator || "between") === "between" ? "Lower Limit" : "Limit",
+              type: "number",
+              value: bc.limitLow ?? "",
+              onChange: e => update(r.id, {
+                bracketingConcentrations: (r.bracketingConcentrations || []).map(x =>
+                  x.id === bc.id ? { ...x, limitLow: Number(e.target.value) || 0 } : x
+                )
+              })
+            }),
+            (bc.comparator || "between") === "between" && /*#__PURE__*/React.createElement(TextField, {
+              label: "Upper Limit",
+              type: "number",
+              value: bc.limitHigh ?? "",
+              onChange: e => update(r.id, {
+                bracketingConcentrations: (r.bracketingConcentrations || []).map(x =>
+                  x.id === bc.id ? { ...x, limitHigh: Number(e.target.value) || 0 } : x
+                )
+              })
+            })
+          )
+        )
+      ),
+      /*#__PURE__*/React.createElement(Button, {
+        size: "sm",
+        variant: "outline",
+        onClick: () => update(r.id, {
+          bracketingConcentrations: [...(r.bracketingConcentrations || []), { id: uid("bkc"), label: "", value: "", comparator: "between", limitLow: 0, limitHigh: 0 }]
+        })
+      }, /*#__PURE__*/React.createElement(Icon, { name: "plus", size: 12 }), "Add Concentration Standard")
+    )
+  ), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] mt-1",
     style: {
       color: C.muted
@@ -1221,6 +1369,20 @@ function TestTypeBuilder({
     const invalid = !testName.trim() || costPerTest === "" || chemicalRequirements.some(r => !r.chemicalId) || dilutionEnabled && dilutionChemicalRequirements.some(r => !r.chemicalId);
     if (invalid) return;
     savingRef.current = true;
+    // Normalize QC rules before persisting: the design screen's Comparator
+    // dropdown falls back to displaying "between" whenever a bracketing
+    // concentration's comparator was never actually written (bc.comparator
+    // || "between"), which used to let a row look correctly configured on
+    // screen while saving with an empty comparator underneath. Bake that
+    // same default into the saved data here so what's stored always matches
+    // what's shown, and downstream evaluation never has to guess.
+    const normalizedQcRules = qcRules.map(r => ({
+      ...r,
+      bracketingConcentrations: (r.bracketingConcentrations || []).map(bc => ({
+        ...bc,
+        comparator: bc.comparator || "between"
+      }))
+    }));
     onSave({
       id: initial?.id || uid("test"),
       testName: testName.trim(),
@@ -1235,7 +1397,7 @@ function TestTypeBuilder({
       dilutionChemicalRequirements: dilutionEnabled ? dilutionChemicalRequirements : [],
       dilutionGasRequirements: dilutionEnabled ? dilutionGasRequirements : [],
       resultParameters,
-      qcRules,
+      qcRules: normalizedQcRules,
       qcFrequency: qcFrequency === "" ? null : Number(qcFrequency)
     });
     savingRef.current = false;
@@ -1429,7 +1591,8 @@ function TestTypeBuilder({
     defaultOpen: resultParameters.length > 0
   }, /*#__PURE__*/React.createElement(ResultParameterEditor, {
     resultParameters: resultParameters,
-    setResultParameters: setResultParameters
+    setResultParameters: setResultParameters,
+    linkedParameter: linkedParameter
   })), /*#__PURE__*/React.createElement(CollapsibleSection, {
     step: 6,
     title: "QC Acceptance Rules",
@@ -1437,7 +1600,8 @@ function TestTypeBuilder({
     defaultOpen: qcRules.length > 0
   }, /*#__PURE__*/React.createElement(QcRuleEditor, {
     qcRules: qcRules,
-    setQcRules: setQcRules
+    setQcRules: setQcRules,
+    linkedParameter: linkedParameter
   }), /*#__PURE__*/React.createElement("div", {
     className: "mt-3 pt-3",
     style: {
@@ -1485,6 +1649,8 @@ function TestConfigurationTab({
   masterChemicals,
   setMasterChemicals,
   testRecords,
+  session,
+  permissionMatrix,
   notify
 }) {
   return /*#__PURE__*/React.createElement("div", null,
@@ -1505,6 +1671,8 @@ function TestConfigurationTab({
       parameters: parameters,
       setParameters: setParameters,
       testTypes: testTypes,
+      session: session,
+      permissionMatrix: permissionMatrix,
       notify: notify
     }),
     testConfigTab === "testTypes" && /*#__PURE__*/React.createElement(TestTypesTab, {
@@ -1521,6 +1689,8 @@ function TestConfigurationTab({
       parameters: parameters,
       setParameters: setParameters,
       testRecords: testRecords,
+      session: session,
+      permissionMatrix: permissionMatrix,
       notify: notify
     })
   );
@@ -1540,8 +1710,16 @@ function TestTypesTab({
   parameters,
   setParameters,
   testRecords,
+  session,
+  permissionMatrix,
   notify
 }) {
+  const ttCreateGate = permGate(permissionMatrix, session, "testTypes", "create", notify, "add test types");
+  const ttEditGate = permGate(permissionMatrix, session, "testTypes", "edit", notify, "edit test types");
+  const ttDeleteGate = permGate(permissionMatrix, session, "testTypes", "delete", notify, "delete test types");
+  const canCreateTestTypes = ttCreateGate.visible;
+  const canEditTestTypes = ttEditGate.visible;
+  const canDeleteTestTypes = ttDeleteGate.visible;
   function parameterSummary(t) {
     return (t.linkedParameterIds || []).map(id => (parameters || []).find(p => p.id === id)).filter(Boolean);
   }
@@ -1578,10 +1756,26 @@ function TestTypesTab({
   function handleSave(testType) {
     if (editingType) {
       setTestTypes(prev => prev.map(t => t.id === testType.id ? testType : t));
+      DataService.appendAudit({
+        entity: "testType",
+        entityId: testType.id,
+        action: "edit",
+        user: session.username,
+        role: session.role,
+        note: `Updated test type "${testType.name}"`
+      });
       notify(`Test type "${testType.name}" updated`);
       setEditingType(null);
     } else {
       setTestTypes(prev => [...prev, testType]);
+      DataService.appendAudit({
+        entity: "testType",
+        entityId: testType.id,
+        action: "create",
+        user: session.username,
+        role: session.role,
+        note: `Created test type "${testType.name}"`
+      });
       notify(`Test type "${testType.name}" created`);
       setShowBuilder(false);
     }
@@ -1594,6 +1788,14 @@ function TestTypesTab({
     }
     setTestTypes(prev => prev.filter(x => x.id !== t.id));
     setDeleteFor(null);
+    DataService.appendAudit({
+      entity: "testType",
+      entityId: t.id,
+      action: "delete",
+      user: session.username,
+      role: session.role,
+      note: `Deleted test type "${t.name}"`
+    });
     notify(`Deleted test type "${t.name}"`);
   }
 
@@ -2216,19 +2418,19 @@ function TestTypesTab({
     style: {
       borderColor: C.border
     }
-  })), /*#__PURE__*/React.createElement(Button, {
+  })), canCreateTestTypes && /*#__PURE__*/React.createElement(Button, {
     variant: "outline",
     size: "sm",
-    onClick: () => {
+    onClick: ttCreateGate.guard(() => {
       resetImportModal();
       setImportOpen(true);
-    }
+    })
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "upload",
     size: 14
-  }), "Import Test Type"), /*#__PURE__*/React.createElement(Button, {
+  }), "Import Test Type"), canCreateTestTypes && /*#__PURE__*/React.createElement(Button, {
     size: "sm",
-    onClick: () => setShowBuilder(true)
+    onClick: ttCreateGate.guard(() => setShowBuilder(true))
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
@@ -2239,9 +2441,9 @@ function TestTypesTab({
     icon: "beaker",
     title: testTypes.length === 0 ? "No test types yet" : "No test types match your search",
     subtitle: testTypes.length === 0 ? "Design one — equipment, chemical/gas requirements, and cost per sample." : "Try a different name, method, or equipment.",
-    action: testTypes.length === 0 ? /*#__PURE__*/React.createElement(Button, {
+    action: testTypes.length === 0 && canCreateTestTypes ? /*#__PURE__*/React.createElement(Button, {
       size: "sm",
-      onClick: () => setShowBuilder(true)
+      onClick: ttCreateGate.guard(() => setShowBuilder(true))
     }, /*#__PURE__*/React.createElement(Icon, {
       name: "plus",
       size: 13
@@ -2348,16 +2550,16 @@ function TestTypesTab({
       color: C.info,
       title: "Export test type",
       onClick: () => exportTestType(t)
-    }), /*#__PURE__*/React.createElement(IconButton, {
+    }), canEditTestTypes && /*#__PURE__*/React.createElement(IconButton, {
       name: "edit",
       color: C.teal,
       title: "Edit test type",
-      onClick: () => setEditingType(t)
-    }), /*#__PURE__*/React.createElement(IconButton, {
+      onClick: ttEditGate.guard(() => setEditingType(t))
+    }), canDeleteTestTypes && /*#__PURE__*/React.createElement(IconButton, {
       name: "trash",
       color: C.warn,
       title: "Delete test type",
-      onClick: () => setDeleteFor(t)
+      onClick: ttDeleteGate.guard(() => setDeleteFor(t))
     }))));
     const detailRow = !isOpen ? null : /*#__PURE__*/React.createElement("tr", {
       key: t.id + "-detail"
